@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/perf"
+
 	"github.com/ethereum/go-ethereum/cachemetrics"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -1842,7 +1844,11 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	// Pre-checks passed, start the full block imports
 	bc.wg.Add(1)
 	bc.chainmu.Lock()
+
+	start := time.Now()
 	n, err := bc.insertChain(chain, true)
+	perf.RecordMPMetrics(perf.MpImportingTotal, start)
+
 	bc.chainmu.Unlock()
 	bc.wg.Done()
 
@@ -1896,6 +1902,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		}
 	}()
 	// Start the parallel header verifier
+	startVerifyHeader := time.Now()
 	headers := make([]*types.Header, len(chain))
 	seals := make([]bool, len(chain))
 
@@ -1904,6 +1911,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		seals[i] = verifySeals
 	}
 	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
+	perf.RecordMPMetrics(perf.MpImportingVerifyHeader, startVerifyHeader)
 	defer close(abort)
 
 	// Peek the error for the first block to decide the directing import logic
@@ -2060,6 +2068,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		//Process block using the parent state as reference point
 		substart := time.Now()
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		//atomic.StoreUint32(&followupInterrupmat, 1)
+		perf.RecordMPMetrics(perf.MpImportingProcess, substart)
+
 		activeState = statedb
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
@@ -2083,6 +2094,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 				bc.reportBlock(block, receipts, err)
 				return it.index, err
 			}
+			perf.RecordMPMetrics(perf.MpImportingVerifyState, substart)
 		}
 		bc.cacheReceipts(block.Hash(), receipts)
 		bc.cacheBlock(block.Hash(), block)
@@ -2100,6 +2112,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		if err != nil {
 			return it.index, err
 		}
+		perf.RecordMPMetrics(perf.MpImportingCommit, substart)
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
