@@ -1009,7 +1009,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 
 			startCommit := time.Now()
 			succeed := w.commitTransactions(txs, w.coinbase, interrupt)
-			perf.RecordMPMetrics(perf.MpMiningCommit, startCommit)
+			perf.RecordMPMetrics(perf.MpMiningCommitTx, startCommit)
 			if succeed {
 				return
 			}
