@@ -23,13 +23,25 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-var emptyCodeHash = crypto.Keccak256(nil)
+var (
+	emptyCodeHash        = crypto.Keccak256(nil)
+	syncPreloadCost      = metrics.NewRegisteredTimer("state/preload/sync/delay", nil)
+	minerPreloadCost     = metrics.NewRegisteredTimer("state/preload/miner/delay", nil)
+	syncPreloadCounter   = metrics.NewRegisteredCounter("state/preload/sync/counter", nil)
+	minerPreloadCounter  = metrics.NewRegisteredCounter("state/preload/miner/counter", nil)
+	syncOverheadCost     = metrics.NewRegisteredTimer("state/overhead/sync/delay", nil)
+	minerOverheadCost    = metrics.NewRegisteredTimer("state/overhead/miner/delay", nil)
+	syncOverheadCounter  = metrics.NewRegisteredCounter("state/overhead/sync/counter", nil)
+	minerOverheadCounter = metrics.NewRegisteredCounter("state/overhead/miner/counter", nil)
+)
 
 type Code []byte
 
@@ -181,32 +193,58 @@ func (s *StateObject) getTrie(db Database) Trie {
 
 // GetState retrieves a value from the account storage trie.
 func (s *StateObject) GetState(db Database, key common.Hash) common.Hash {
+	hitInCache := false
+	start := time.Now()
+
+	defer func() {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+		if isSyncMainProcess && hitInCache {
+			cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
+			cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
+			cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
+		}
+
+		if isMinerMainProcess && hitInCache {
+			cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
+			cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
+			cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
+		}
+	}()
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if s.fakeStorage != nil {
+		hitInCache = true
 		return s.fakeStorage[key]
 	}
 	// If we have a dirty value for this state entry, return it
 	value, dirty := s.dirtyStorage[key]
 	if dirty {
+		hitInCache = true
 		return value
 	}
+
 	// Otherwise return the entry's original value
-	return s.GetCommittedState(db, key)
+	return s.GetCommittedState(db, key, &hitInCache)
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (s *StateObject) GetCommittedState(db Database, key common.Hash) common.Hash {
+func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool) common.Hash {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if s.fakeStorage != nil {
 		return s.fakeStorage[key]
 	}
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
+		*hit = true
 		return value
 	}
+
 	if value, cached := s.originStorage[key]; cached {
+		*hit = true
 		return value
 	}
+
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc   []byte
@@ -314,6 +352,23 @@ func (s *StateObject) setState(key, value common.Hash) {
 // committed later. It is invoked at the end of every transaction.
 func (s *StateObject) finalise(prefetch bool) {
 	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
+	var overheadCost time.Duration
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			syncOverheadCost.Update(overheadCost)
+			syncOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+		// record metrics of mining main process
+		if isMinerMainProcess {
+			minerOverheadCost.Update(overheadCost)
+			minerOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+	}()
+	start := time.Now()
 	for key, value := range s.dirtyStorage {
 		s.pendingStorage[key] = value
 		if value != s.originStorage[key] {
@@ -323,6 +378,7 @@ func (s *StateObject) finalise(prefetch bool) {
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != emptyRoot {
 		s.db.prefetcher.prefetch(s.data.Root, slotsToPrefetch, s.addrHash)
 	}
+	overheadCost = time.Since(start)
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
 	}
