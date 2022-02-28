@@ -405,6 +405,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// initilise bloom processors
 	bloomProcessors := NewAsyncReceiptBloomGenerator(txNum)
 
+	applyStart := time.Now()
 	// usually do have two tx, one for validator set contract, another for system reward contract.
 	systemTxs := make([]*types.Transaction, 0, 2)
 	for i, tx := range block.Transactions() {
@@ -430,6 +431,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		commonTxs = append(commonTxs, tx)
 		receipts = append(receipts, receipt)
 	}
+	perf.RecordMPMetrics(perf.MpImportingProcessExecuteApply, applyStart)
 	bloomProcessors.Close()
 	perf.RecordMPMetrics(perf.MpImportingProcessExecute, executeStart)
 
