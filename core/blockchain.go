@@ -2841,6 +2841,9 @@ func (bc *BlockChain) maintainTxIndex(ancients uint64) {
 
 // reportBlock logs a bad block error.
 func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
+	//record bad block count
+	perf.RecordMPMetrics(perf.MpBadBlock, time.Now())
+
 	rawdb.WriteBadBlock(bc.db, block)
 
 	var receiptString string
