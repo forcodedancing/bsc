@@ -29,6 +29,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/perf"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -1890,6 +1894,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number())
 	go senderCacher.recoverFromBlocks(signer, chain)
 
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
+
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
 		lastCanon *types.Block
@@ -2086,7 +2093,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 
 		// Validate the state using the default validator
 		if !statedb.IsLightProcessed() {
-			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+			substart = time.Now()
+			err := bc.validator.ValidateState(block, statedb, receipts, usedGas)
+			perf.RecordMPMetrics(perf.MpImportingVerifyState, substart)
+
+			if err != nil {
 				log.Error("validate state failed", "error", err)
 				bc.reportBlock(block, receipts, err)
 				return it.index, err

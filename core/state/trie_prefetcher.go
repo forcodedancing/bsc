@@ -18,6 +18,9 @@ package state
 
 import (
 	"sync"
+	"time"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -30,6 +33,14 @@ const abortChanSize = 64
 var (
 	// triePrefetchMetricsPrefix is the prefix under which to publis the metrics.
 	triePrefetchMetricsPrefix = "trie/prefetch/"
+	trieSubPrefetchTimer      = metrics.NewRegisteredTimer("trie/subprefetch/delay", nil)
+	trieSubPrefetchCounter    = metrics.NewRegisteredCounter("trie/prefetch/total", nil)
+	triePrefetchTimer         = metrics.NewRegisteredTimer("trie/prefetch/delay", nil)
+
+	syncNewPrefetchCost     = metrics.NewRegisteredTimer("state/newfetchoverhead/sync/delay", nil)
+	mineNewPrefetchCost     = metrics.NewRegisteredTimer("state/newfetchoverhead/miner/delay", nil)
+	syncNewPrefetchCounter  = metrics.NewRegisteredCounter("state/newfetchoverhead/sync/counter", nil)
+	minerNewPrefetchCounter = metrics.NewRegisteredCounter("state/newfetchoverhead/miner/counter", nil)
 )
 
 // triePrefetcher is an active prefetcher, which receives accounts or storage
@@ -103,7 +114,9 @@ func (p *triePrefetcher) abortLoop() {
 // close iterates over all the subfetchers, aborts any that were left spinning
 // and reports the stats to the metrics subsystem.
 func (p *triePrefetcher) close() {
+	var duration time.Duration
 	for _, fetcher := range p.fetchers {
+		duration += fetcher.preDataRead
 		p.abortChan <- fetcher // safe to do multiple times
 		<-fetcher.term
 		if metrics.Enabled {
@@ -128,6 +141,8 @@ func (p *triePrefetcher) close() {
 			}
 		}
 	}
+	trieSubPrefetchCounter.Inc(duration.Nanoseconds())
+	triePrefetchTimer.Update(duration)
 	close(p.closeChan)
 	// Clear out all fetchers (will crash on a second call, deliberate)
 	p.fetchers = nil
@@ -173,6 +188,23 @@ func (p *triePrefetcher) prefetch(root common.Hash, keys [][]byte, accountHash c
 	if p.fetches != nil {
 		return
 	}
+	start := time.Now()
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+
+		if isSyncMainProcess {
+			overheadCost := time.Since(start)
+			syncNewPrefetchCost.Update(overheadCost)
+			syncNewPrefetchCounter.Inc(overheadCost.Nanoseconds())
+		}
+		if isMinerMainProcess {
+			overheadCost := time.Since(start)
+			mineNewPrefetchCost.Update(overheadCost)
+			minerNewPrefetchCounter.Inc(overheadCost.Nanoseconds())
+		}
+	}()
 	// Active fetcher, schedule the retrievals
 	fetcher := p.fetchers[root]
 	if fetcher == nil {
@@ -242,6 +274,7 @@ type subfetcher struct {
 	used [][]byte            // Tracks the entries used in the end
 
 	accountHash common.Hash
+	preDataRead time.Duration
 }
 
 // newSubfetcher creates a goroutine to prefetch state items belonging to a
@@ -256,6 +289,7 @@ func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subf
 		copy:        make(chan chan Trie),
 		seen:        make(map[string]struct{}),
 		accountHash: accountHash,
+		preDataRead: 0,
 	}
 	gopool.Submit(func() {
 		sf.loop()
@@ -311,7 +345,10 @@ func (sf *subfetcher) abort() {
 func (sf *subfetcher) loop() {
 	// No matter how the loop stops, signal anyone waiting that it's terminated
 	defer close(sf.term)
-
+	start := time.Now()
+	defer func() {
+		sf.preDataRead += time.Since(start)
+	}()
 	// Start by opening the trie and stop processing if it fails
 	var trie Trie
 	var err error

@@ -25,6 +25,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/perf"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -82,7 +86,8 @@ const (
 )
 
 var (
-	commitTxsTimer = metrics.NewRegisteredTimer("worker/committxs", nil)
+	commitTxsTimer   = metrics.NewRegisteredTimer("worker/committxs", nil)
+	totalMiningTimer = metrics.NewRegisteredTimer("worker/mine", nil)
 )
 
 // environment is the worker's current environment and holds all of the current state information.
@@ -908,6 +913,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	routeid := cachemetrics.Goid()
+	cachemetrics.UpdateMiningRoutineID(routeid)
+
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
@@ -1019,6 +1027,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	startFinalize := time.Now()
 	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(w.current.header), s, w.current.txs, uncles, w.current.receipts)
 	perf.RecordMPMetrics(perf.MpMiningFinalize, startFinalize)
+  
 	if err != nil {
 		return err
 	}
@@ -1026,6 +1035,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		if interval != nil {
 			interval()
 		}
+		start = time.Now()
 		select {
 		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
@@ -1033,6 +1043,9 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(),
 				"elapsed", common.PrettyDuration(time.Since(start)))
+
+			// mark mingTime as a metrics
+			totalMiningTimer.Update(time.Since(start))
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")
