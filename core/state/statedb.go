@@ -239,6 +239,13 @@ func (s *StateDB) EnablePipeCommit() {
 	}
 }
 
+func (s *StateDB) IsPipeCommit() bool {
+	if s.snap != nil {
+		return s.pipeCommit
+	}
+	return false
+}
+
 // Mark that the block is full processed
 func (s *StateDB) MarkFullProcessed() {
 	s.fullProcessed = true
@@ -1204,6 +1211,22 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	return s.StateIntermediateRoot()
 }
 
+func (s *StateDB) PopulateSnapAccountAndStorage() {
+	for addr := range s.stateObjectsPending {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			if s.snap != nil && !obj.deleted {
+				s.populateSnapStorage(obj)
+				s.snapAccounts[obj.address] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, emptyRoot, obj.data.CodeHash)
+			}
+			data, err := rlp.EncodeToBytes(obj)
+			if err != nil {
+				panic(fmt.Errorf("can't encode object at %x: %v", addr[:], err))
+			}
+			obj.encodeData = data
+		}
+	}
+}
+
 func (s *StateDB) AccountsIntermediateRoot() {
 	tasks := make(chan func())
 	finishCh := make(chan struct{})
@@ -1255,6 +1278,35 @@ func (s *StateDB) AccountsIntermediateRoot() {
 	wg.Wait()
 }
 
+func (s *StateDB) populateSnapStorage(obj *StateObject) {
+	for key, value := range obj.dirtyStorage {
+		obj.pendingStorage[key] = value
+	}
+	if len(obj.pendingStorage) == 0 {
+		return
+	}
+	var storage map[string][]byte
+	for key, value := range obj.pendingStorage {
+		var v []byte
+		if (value == common.Hash{}) {
+		} else {
+			// Encoding []byte cannot fail, ok to ignore the error.
+			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+		}
+		// If state snapshotting is active, cache the data til commit
+		if obj.db.snap != nil {
+			if storage == nil {
+				// Retrieve the old storage map, if available, create a new one otherwise
+				if storage = obj.db.snapStorage[obj.address]; storage == nil {
+					storage = make(map[string][]byte)
+					obj.db.snapStorage[obj.address] = storage
+				}
+			}
+			storage[string(key[:])] = v // v will be nil if value is 0x00
+		}
+	}
+}
+
 func (s *StateDB) StateIntermediateRoot() common.Hash {
 	// If there was a trie prefetcher operating, it gets aborted and irrevocably
 	// modified after we start retrieving tries. Remove it from the statedb after
@@ -1289,6 +1341,7 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 		}
 		s.trie = tr
 	}
+
 	usedAddrs := make([][]byte, 0, len(s.stateObjectsPending))
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; obj.deleted {
@@ -1301,6 +1354,7 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	if prefetcher != nil {
 		prefetcher.used(s.originalRoot, usedAddrs)
 	}
+
 	if len(s.stateObjectsPending) > 0 {
 		s.stateObjectsPending = make(map[common.Address]struct{})
 	}
@@ -1478,6 +1532,10 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 	var diffLayer *types.DiffLayer
 	var verified chan struct{}
 	var snapUpdated chan struct{}
+	var snapCreated chan common.Hash
+
+	var snapAccountLock sync.Mutex // To protect snapAccount
+
 	if s.snap != nil {
 		diffLayer = &types.DiffLayer{}
 	}
@@ -1485,13 +1543,37 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 		// async commit the MPT
 		verified = make(chan struct{})
 		snapUpdated = make(chan struct{})
+		snapCreated = make(chan common.Hash)
 	}
 
 	commmitTrie := func() error {
 		commitErr := func() error {
+			accountData := make(map[common.Hash][]byte)
+			if s.pipeCommit {
+				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
+				snapAccountLock.Lock()
+				s.AccountsIntermediateRoot()
+				snapAccountLock.Unlock()
+				for k, v := range s.snapAccounts {
+					accountData[crypto.Keccak256Hash(k[:])] = v
+				}
+			}
+
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
+				if s.pipeCommit {
+					<-snapCreated
+				}
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
 			}
+
+			if s.pipeCommit {
+				//Fix the account data in difflayer here
+				root := <-snapCreated
+				if root != (common.Hash{}) {
+					s.snaps.Snapshot(root).CorrectAccounts(accountData)
+				}
+			}
+
 			tasks := make(chan func())
 			taskResults := make(chan error, len(s.stateObjectsDirty))
 			tasksNum := 0
@@ -1631,8 +1713,16 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				}
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
-					if err := s.snaps.Update(s.expectedRoot, parent, s.snapDestructs, s.snapAccounts, s.snapStorage, verified); err != nil {
+					snapAccountLock.Lock()
+					err := s.snaps.Update(s.expectedRoot, parent, s.snapDestructs, s.snapAccounts, s.snapStorage, verified)
+					snapAccountLock.Unlock()
+
+					hashToSend := s.expectedRoot
+					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
+					}
+					if s.pipeCommit {
+						snapCreated <- hashToSend
 					}
 					// Keep n diff layers in the memory
 					// - head layer is paired with HEAD state
@@ -1643,13 +1733,19 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 							log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", s.snaps.CapLimit(), "err", err)
 						}
 					}()
+				} else {
+					if s.pipeCommit { // If no snap created, still need to put data into the channel
+						snapCreated <- common.Hash{}
+					}
 				}
 			}
 			return nil
 		},
 		func() error {
 			if s.snap != nil {
+				snapAccountLock.Lock()
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
+				snapAccountLock.Unlock()
 			}
 			return nil
 		},

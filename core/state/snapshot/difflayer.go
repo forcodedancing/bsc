@@ -183,6 +183,7 @@ func newDiffLayer(parent snapshot, root common.Hash, destructs map[common.Hash]s
 		storageList: make(map[common.Hash][]common.Hash),
 		verifiedCh:  verified,
 	}
+
 	switch parent := parent.(type) {
 	case *diskLayer:
 		dl.rebloom(parent)
@@ -191,6 +192,7 @@ func newDiffLayer(parent snapshot, root common.Hash, destructs map[common.Hash]s
 	default:
 		panic("unknown parent type")
 	}
+
 	// Sanity check that accounts or storage slots are never nil
 	for accountHash, blob := range accounts {
 		if blob == nil {
@@ -285,6 +287,13 @@ func (dl *diffLayer) Verified() bool {
 	default:
 		return false
 	}
+}
+
+func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+
+	dl.accountData = accounts
 }
 
 // Parent returns the subsequent layer of a diff layer.

@@ -135,6 +135,9 @@ type Snapshot interface {
 	// Store the verification result
 	MarkValid()
 
+	// Update account data for storing the correct data
+	CorrectAccounts(map[common.Hash][]byte)
+
 	// Account directly retrieves the account associated with a particular hash in
 	// the snapshot slim data format.
 	Account(hash common.Hash) (*Account, error)
