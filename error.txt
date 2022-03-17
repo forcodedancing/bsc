@@ -1,0 +1,6 @@
+INFO [03-17|15:46:35.176] Starting pprof server                    addr=http://127.0.0.1:6060/debug/pprof
+INFO [03-17|15:46:35.177] Starting Geth on Ethereum mainnet... 
+INFO [03-17|15:46:35.177] Enabling metrics collection 
+INFO [03-17|15:46:35.179] Maximum peer count                       ETH=30 LES=100 total=130
+WARN [03-17|15:46:35.179] The flag --rpccorsdomain is deprecated and will be removed June 2021, please use --http.corsdomain 
+WARN [03-17|15:46:35.179] Option nousb is deprecated and USB is deactivated by default. Use --usb to enable 

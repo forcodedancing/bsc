@@ -132,10 +132,10 @@ type Snapshot interface {
 	// Verified returns whether the snapshot is verified
 	Verified() bool
 
-	// Store the verification result
+	// MarkValid stores the verification result
 	MarkValid()
 
-	// Update account data for storing the correct data
+	// CorrectAccounts updates account data for storing the correct data during pipecommit
 	CorrectAccounts(map[common.Hash][]byte)
 
 	// Account directly retrieves the account associated with a particular hash in
@@ -266,6 +266,10 @@ func (t *Tree) waitBuild() {
 	if done != nil {
 		<-done
 	}
+}
+
+func (t *Tree) Layers() int {
+	return len(t.layers)
 }
 
 // Disable interrupts any pending snapshot generator, deletes all the snapshot
