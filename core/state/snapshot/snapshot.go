@@ -113,6 +113,8 @@ type Snapshot interface {
 	// CorrectAccounts updates account data for storing the correct data during pipecommit
 	CorrectAccounts(map[common.Hash][]byte)
 
+	PrintAccountsStorage()
+
 	// Account directly retrieves the account associated with a particular hash in
 	// the snapshot slim data format.
 	Account(hash common.Hash) (*Account, error)
@@ -245,6 +247,17 @@ func (t *Tree) waitBuild() {
 
 func (t *Tree) Layers() int {
 	return len(t.layers)
+}
+
+func (t *Tree) PrintAccountStorage(root common.Hash) {
+	if t == nil || t.layers == nil {
+		return
+	}
+	for _, l := range t.layers {
+		if l.Root() == root {
+			l.PrintAccountsStorage()
+		}
+	}
 }
 
 // Disable interrupts any pending snapshot generator, deletes all the snapshot
@@ -385,6 +398,7 @@ func (t *Tree) CapLimit() int {
 // survival is only known *after* capping, we need to omit it from the count if
 // we want to ensure that *at least* the requested number of diff layers remain.
 func (t *Tree) Cap(root common.Hash, layers int) error {
+	return nil
 	// Retrieve the head snapshot to cap from
 	snap := t.Snapshot(root)
 	if snap == nil {

@@ -189,7 +189,7 @@ func (s *StateDB) StartPrefetcher(namespace string) {
 		s.prefetcher = nil
 	}
 	if s.snap != nil {
-		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace)
+		//s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace)
 	}
 }
 
@@ -989,11 +989,15 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// transactions within the same block might self destruct and then
 			// ressurrect an account; but the snapshotter needs both events.
 			if s.snap != nil {
+				if s.pipeCommit {
+					s.snap.WaitAndGetVerifyRes()
+				}
 				s.snapDestructs[obj.address] = struct{}{} // We need to maintain account deletions explicitly (will remain set indefinitely)
 				delete(s.snapAccounts, obj.address)       // Clear out any previously updated account data (may be recreated via a ressurrect)
 				delete(s.snapStorage, obj.address)        // Clear out any previously updated storage data (may be recreated via a ressurrect)
 			}
 		} else {
+			//todo here
 			obj.finalise(true) // Prefetch slots in the background
 		}
 		if _, exist := s.stateObjectsPending[addr]; !exist {
@@ -1008,6 +1012,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		}
 	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		if s.snap != nil && s.pipeCommit {
+			s.snap.WaitAndGetVerifyRes()
+		}
 		s.prefetcher.prefetch(s.originalRoot, addressesToPrefetch, emptyAddr)
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -1370,9 +1377,24 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				}
 			}
 
+			fmt.Println("-----------------s.stateRoot---------------")
+			s.snaps.PrintAccountStorage(s.stateRoot)
+			fmt.Println("-----------------s.expectedRoot---------------")
+			s.snaps.PrintAccountStorage(s.expectedRoot)
+
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
 				fmt.Printf("Invalid merkle root (remote: %x local: %x) \n", s.expectedRoot, s.stateRoot)
+				fmt.Println("-----------------s.stateRoot---------------")
+				s.snaps.PrintAccountStorage(s.stateRoot)
+				fmt.Println("-----------------s.expectedRoot---------------")
+				s.snaps.PrintAccountStorage(s.expectedRoot)
+				fmt.Println("-----------------end---------------")
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+			}
+
+			needRoot := common.HexToHash("963cba8883bb250c4fb97d11234e67a5c30583be939f7d672cbed99ba8e59a8c")
+			if s.expectedRoot == needRoot {
+				s.snaps.PrintAccountStorage(needRoot)
 			}
 
 			tasks := make(chan func())

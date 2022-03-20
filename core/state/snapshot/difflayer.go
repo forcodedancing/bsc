@@ -291,8 +291,34 @@ func (dl *diffLayer) Verified() bool {
 func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
-
+	fmt.Println("------------------------before correct accounts")
+	dl.PrintAccountsStorage()
+	fmt.Println("------------------------end before correct accounts")
 	dl.accountData = accounts
+	fmt.Println("------------------------after correct accounts")
+	dl.PrintAccountsStorage()
+	fmt.Println("------------------------end after correct accounts")
+}
+
+func (dl *diffLayer) PrintAccountsStorage() {
+	fmt.Println("dl.destructSet length", len(dl.destructSet))
+	for k, _ := range dl.destructSet {
+		fmt.Printf("dl.destructSet k=%s\n", k.Hex())
+	}
+
+	fmt.Println("dl.accountData length", len(dl.accountData))
+	for k, v := range dl.accountData {
+		fmt.Printf("dl.accountData k=%s v=%x\n", k.Hex(), v)
+	}
+
+	fmt.Println("dl.storageData length", len(dl.storageData))
+	for k, v := range dl.storageData {
+		fmt.Printf("dl.storageData k=%s len=%d \n", k.Hex(), len(v))
+		for kk, vv := range v {
+			fmt.Printf("\t\tdl.storageData kk=%s vv=%x\n", kk.Hex(), vv)
+		}
+	}
+
 }
 
 // Parent returns the subsequent layer of a diff layer.
@@ -483,6 +509,7 @@ func (dl *diffLayer) flatten() snapshot {
 	parent.lock.Lock()
 	defer parent.lock.Unlock()
 
+	dl.WaitAndGetVerifyRes()
 	// Before actually writing all our data to the parent, first ensure that the
 	// parent hasn't been 'corrupted' by someone else already flattening into it
 	if atomic.SwapUint32(&parent.stale, 1) != 0 {
