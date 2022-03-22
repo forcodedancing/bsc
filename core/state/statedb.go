@@ -1209,6 +1209,24 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	return s.StateIntermediateRoot()
 }
 
+//CorrectAccountsRoot will fix account roots in pipecommit mode
+func (s *StateDB) CorrectAccountsRoot() {
+	addressesToPrefetch := make([][]byte, 0, len(s.stateObjectsPending))
+	for addr := range s.stateObjectsPending {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
+				if acc != nil && len(acc.Root) != 0 {
+					obj.data.Root = common.BytesToHash(acc.Root)
+				}
+			}
+		}
+		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:]))
+	}
+	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		s.prefetcher.prefetch(s.originalRoot, addressesToPrefetch, emptyAddr)
+	}
+}
+
 //PopulateSnapAccountAndStorage tries to populate required accounts and storages for pipecommit
 func (s *StateDB) PopulateSnapAccountAndStorage() {
 	for addr := range s.stateObjectsPending {
@@ -1538,25 +1556,21 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 
 	commmitTrie := func() error {
 		commitErr := func() error {
-			accountData := make(map[common.Hash][]byte)
 			if s.pipeCommit {
-				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
 				<-snapUpdated
+				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
 				s.AccountsIntermediateRoot()
-				for k, v := range s.snapAccounts {
-					accountData[crypto.Keccak256Hash(k[:])] = v
+				if parent := s.snap.Root(); parent != s.expectedRoot {
+					accountData := make(map[common.Hash][]byte)
+					for k, v := range s.snapAccounts {
+						accountData[crypto.Keccak256Hash(k[:])] = v
+					}
+					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
 				}
 			}
 
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
-			}
-
-			if s.pipeCommit {
-				//Fix the account data in difflayer here
-				if parent := s.snap.Root(); parent != s.expectedRoot {
-					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
-				}
 			}
 
 			tasks := make(chan func())
@@ -1647,12 +1661,10 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 
 		if s.pipeCommit {
 			if commitErr == nil {
-				<-snapUpdated
 				s.snaps.Snapshot(s.stateRoot).MarkValid()
 			} else {
 				// The blockchain will do the further rewind if write block not finish yet
 				if failPostCommitFunc != nil {
-					<-snapUpdated
 					failPostCommitFunc()
 				}
 				log.Error("state verification failed", "err", commitErr)
@@ -1696,6 +1708,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				if s.pipeCommit {
 					defer close(snapUpdated)
 				}
+				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					err := s.snaps.Update(s.expectedRoot, parent, s.snapDestructs, s.snapAccounts, s.snapStorage, verified)
@@ -1714,12 +1727,6 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 						}
 					}()
 				}
-			}
-			return nil
-		},
-		func() error {
-			if s.snap != nil {
-				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 			}
 			return nil
 		},
