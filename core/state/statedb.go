@@ -1209,24 +1209,6 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	return s.StateIntermediateRoot()
 }
 
-//CorrectAccountsRoot will fix account roots in pipecommit mode
-func (s *StateDB) CorrectAccountsRoot() {
-	addressesToPrefetch := make([][]byte, 0, len(s.stateObjectsPending))
-	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; !obj.deleted {
-			if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
-				if acc != nil && len(acc.Root) != 0 {
-					obj.data.Root = common.BytesToHash(acc.Root)
-				}
-			}
-		}
-		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:]))
-	}
-	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
-		s.prefetcher.prefetch(s.originalRoot, addressesToPrefetch, emptyAddr)
-	}
-}
-
 //PopulateSnapAccountAndStorage tries to populate required accounts and storages for pipecommit
 func (s *StateDB) PopulateSnapAccountAndStorage() {
 	for addr := range s.stateObjectsPending {

@@ -78,10 +78,11 @@ func (s Storage) Copy() Storage {
 // Account values can be accessed and modified through the object.
 // Finally, call CommitTrie to write the modified storage trie into a database.
 type StateObject struct {
-	address  common.Address
-	addrHash common.Hash // hash of ethereum address of the account
-	data     Account
-	db       *StateDB
+	address       common.Address
+	addrHash      common.Hash // hash of ethereum address of the account
+	data          Account
+	db            *StateDB
+	rootCorrected bool // To indicate whether the root has been corrected in pipecommit mode
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -398,6 +399,20 @@ func (s *StateObject) finalise(prefetch bool) {
 	for key, value := range s.dirtyStorage {
 		if value != s.originStorage[key] {
 			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
+		}
+	}
+
+	// The account root need to be updated before prefetch, otherwise the account root is empty
+	if s.db.pipeCommit {
+		if s.data.Root == emptyRoot && !s.rootCorrected {
+			if s.db.snap.AccountsCorrected() {
+				if acc, err := s.db.snap.Account(crypto.HashData(s.db.hasher, s.address.Bytes())); err == nil {
+					if acc != nil && len(acc.Root) != 0 {
+						s.data.Root = common.BytesToHash(acc.Root)
+						s.rootCorrected = true
+					}
+				}
+			}
 		}
 	}
 
