@@ -1211,11 +1211,11 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 
 //CorrectAccountsRoot will fix account roots in pipecommit mode
 func (s *StateDB) CorrectAccountsRoot() {
-	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; !obj.deleted {
-			if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
-				if acc != nil && len(acc.Root) != 0 {
-					obj.data.Root = common.BytesToHash(acc.Root)
+	if accounts, err := s.snap.Accounts(); err == nil {
+		for _, obj := range s.stateObjects {
+			if !obj.deleted && !obj.rootCorrected {
+				if account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]; exist && len(account.Root) != 0 {
+					obj.data.Root = common.BytesToHash(account.Root)
 				}
 			}
 		}
@@ -1227,20 +1227,24 @@ func (s *StateDB) PopulateSnapAccountAndStorage() {
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			if s.snap != nil && !obj.deleted {
-				s.populateSnapStorage(obj)
-				s.snapAccounts[obj.address] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, emptyRoot, obj.data.CodeHash)
+				root := obj.data.Root
+				storageChanged := s.populateSnapStorage(obj)
+				if storageChanged {
+					root = emptyRoot
+				}
+				s.snapAccounts[obj.address] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, root, obj.data.CodeHash)
 			}
 		}
 	}
 }
 
-//populateSnapStorage tries to populate required storages for pipecommit
-func (s *StateDB) populateSnapStorage(obj *StateObject) {
+//populateSnapStorage tries to populate required storages for pipecommit, and returns a flag to indicate whether the storage root changed or not
+func (s *StateDB) populateSnapStorage(obj *StateObject) bool {
 	for key, value := range obj.dirtyStorage {
 		obj.pendingStorage[key] = value
 	}
 	if len(obj.pendingStorage) == 0 {
-		return
+		return false
 	}
 	var storage map[string][]byte
 	for key, value := range obj.pendingStorage {
@@ -1261,6 +1265,7 @@ func (s *StateDB) populateSnapStorage(obj *StateObject) {
 			storage[string(key[:])] = v // v will be nil if value is 0x00
 		}
 	}
+	return true
 }
 
 func (s *StateDB) AccountsIntermediateRoot() {
@@ -1565,6 +1570,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 			}
 
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
+				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
 			}
 
