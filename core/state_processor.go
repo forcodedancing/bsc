@@ -18,8 +18,10 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/perf"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -384,8 +386,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		allLogs []*types.Log
 		gp      = new(GasPool).AddGas(block.GasLimit())
 	)
+
+	preloadStart := time.Now()
 	signer := types.MakeSigner(p.bc.chainConfig, block.Number())
 	statedb.TryPreload(block, signer)
+	perf.RecordMPMetrics(perf.MpImportingProcessPreload, preloadStart)
+
+	executeStart := time.Now()
 	var receipts = make([]*types.Receipt, 0)
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
@@ -432,9 +439,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 	}
 	bloomProcessors.Close()
+	perf.RecordMPMetrics(perf.MpImportingProcessExecute, executeStart)
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	finalizeStart := time.Now()
 	err := p.engine.Finalize(p.bc, header, statedb, &commonTxs, block.Uncles(), &receipts, &systemTxs, usedGas)
+	perf.RecordMPMetrics(perf.MpImportingProcessFinalize, finalizeStart)
+
 	if err != nil {
 		return statedb, receipts, allLogs, *usedGas, err
 	}
@@ -451,7 +462,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	evm.Reset(txContext, statedb)
 
 	// Apply the transaction to the current state (included in the env).
-	result, err := ApplyMessage(evm, msg, gp)
+	ctx := context.WithValue(context.TODO(), "mp", true)
+	result, err := ApplyMessage(ctx, evm, msg, gp)
 	if err != nil {
 		return nil, err
 	}

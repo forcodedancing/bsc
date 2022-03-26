@@ -203,6 +203,7 @@ func applyMetricConfig(ctx *cli.Context, cfg *gethConfig) {
 	if ctx.GlobalIsSet(utils.MetricsEnabledExpensiveFlag.Name) {
 		cfg.Metrics.EnabledExpensive = ctx.GlobalBool(utils.MetricsEnabledExpensiveFlag.Name)
 	}
+
 	if ctx.GlobalIsSet(utils.MetricsHTTPFlag.Name) {
 		cfg.Metrics.HTTP = ctx.GlobalString(utils.MetricsHTTPFlag.Name)
 	}
