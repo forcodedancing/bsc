@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/perf"
 	"time"
 
 	"github.com/ethereum/go-ethereum/consensus"
@@ -137,13 +138,26 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	}
 	if statedb.IsPipeCommit() {
 		validateFuns = append(validateFuns, func() error {
-			if err := statedb.WaitPipeVerification(); err != nil {
+			start := time.Now()
+			err := statedb.WaitPipeVerification()
+			perf.RecordMPMetrics(perf.MpImportingWaitPipeVerification, start)
+			if err != nil {
 				return err
 			}
+
+			start = time.Now()
 			statedb.CorrectAccountsRoot()
+			perf.RecordMPMetrics(perf.MpImportingCorrectAccountsRoot, start)
+
+			start = time.Now()
 			statedb.Finalise(v.config.IsEIP158(header.Number))
+			perf.RecordMPMetrics(perf.MpImportingFinalise, start)
+
+			start = time.Now()
 			// State verification pipeline - accounts root are not calculated here, just populate needed fields for process
 			statedb.PopulateSnapAccountAndStorage()
+			perf.RecordMPMetrics(perf.MpImportingPopulateSnapAccountAndStorage, start)
+
 			return nil
 		})
 	} else {

@@ -27,6 +27,11 @@ const (
 	MpImportingProcessFinalize MpMetricsName = "MP_IMPORTING_PROCESS_FINALIZE"
 	MpImportingCommit          MpMetricsName = "MP_IMPORTING_COMMIT"
 
+	MpImportingWaitPipeVerification          MpMetricsName = "MpImportingWaitPipeVerification"
+	MpImportingCorrectAccountsRoot           MpMetricsName = "MpImportingCorrectAccountsRoot"
+	MpImportingFinalise                      MpMetricsName = "MpImportingFinalise"
+	MpImportingPopulateSnapAccountAndStorage MpMetricsName = "MpImportingPopulateSnapAccountAndStorage"
+
 	MpPropagationTotal         MpMetricsName = "MP_PROPAGATION_TOTAL"
 	MpPropagationSend          MpMetricsName = "MP_PROPAGATION_SEND"
 	MpPropagationRequestHeader MpMetricsName = "MP_PROPAGATION_REQUEST_HEADER"
@@ -87,6 +92,15 @@ var (
 
 	importingCommitAllCounter = metrics.NewRegisteredCounter("mp/importing/commit/all", nil)
 	importingCommitTimer      = metrics.NewRegisteredTimer("mp/importing/commit", nil)
+
+	importingWaitPipeVerificationAllCounter          = metrics.NewRegisteredCounter("mp/importing/WaitPipeVerification/all", nil)
+	importingWaitPipeVerificationTimer               = metrics.NewRegisteredTimer("mp/importing/WaitPipeVerification", nil)
+	importingCorrectAccountsRootAllCounter           = metrics.NewRegisteredCounter("mp/importing/CorrectAccountsRoot/all", nil)
+	importingCorrectAccountsRootTimer                = metrics.NewRegisteredTimer("mp/importing/CorrectAccountsRoot", nil)
+	importingFinaliseAllCounter                      = metrics.NewRegisteredCounter("mp/importing/Finalise/all", nil)
+	importingFinaliseTimer                           = metrics.NewRegisteredTimer("mp/importing/Finalise", nil)
+	importingPopulateSnapAccountAndStorageAllCounter = metrics.NewRegisteredCounter("mp/importing/PopulateSnapAccountAndStorage/all", nil)
+	importingPopulateSnapAccountAndStorageTimer      = metrics.NewRegisteredTimer("mp/importing/PopulateSnapAccountAndStorage", nil)
 
 	//block importing, block mining, p2p overall metrics
 	propagationTotalTimer = metrics.NewRegisteredTimer("mp/propagation/total", nil)
@@ -154,6 +168,19 @@ func RecordMPMetrics(metricsName MpMetricsName, start time.Time) {
 	case MpImportingCommit:
 		recordTimer(importingCommitTimer, start)
 		increaseCounter(importingCommitAllCounter, start)
+
+	case MpImportingWaitPipeVerification:
+		recordTimer(importingWaitPipeVerificationTimer, start)
+		increaseCounter(importingWaitPipeVerificationAllCounter, start)
+	case MpImportingCorrectAccountsRoot:
+		recordTimer(importingCorrectAccountsRootTimer, start)
+		increaseCounter(importingCorrectAccountsRootAllCounter, start)
+	case MpImportingFinalise:
+		recordTimer(importingFinaliseTimer, start)
+		increaseCounter(importingFinaliseAllCounter, start)
+	case MpImportingPopulateSnapAccountAndStorage:
+		recordTimer(importingPopulateSnapAccountAndStorageTimer, start)
+		increaseCounter(importingPopulateSnapAccountAndStorageAllCounter, start)
 
 	case MpPropagationTotal:
 		recordTimer(propagationTotalTimer, start)
