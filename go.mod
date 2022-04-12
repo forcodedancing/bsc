@@ -86,4 +86,4 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 )
 
-replace golang.org/x/crypto => github.com/forcodedancing/crypto v0.0.0-20220408085627-d1581c38dd8e
+replace golang.org/x/crypto => github.com/forcodedancing/crypto v0.0.0-20220412033528-a8b947fcfa2c
