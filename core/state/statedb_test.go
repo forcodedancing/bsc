@@ -214,6 +214,38 @@ func TestCopy(t *testing.T) {
 	}
 }
 
+func BenchmarkCopy(b *testing.B) {
+	b.ReportAllocs()
+	orig, _ := New(common.Hash{}, NewDatabase(rawdb.NewMemoryDatabase()), nil)
+
+	for i := byte(0); i < 255; i++ {
+		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+		obj.AddBalance(big.NewInt(int64(i)))
+		orig.updateStateObject(obj)
+	}
+
+	for i := 0; i < b.N; i++ {
+		copy := orig.Copy()
+		_ = copy
+	}
+}
+
+func BenchmarkCopyWithSyncPool(b *testing.B) {
+	b.ReportAllocs()
+	orig, _ := New(common.Hash{}, NewDatabase(rawdb.NewMemoryDatabase()), nil)
+
+	for i := byte(0); i < 255; i++ {
+		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+		obj.AddBalance(big.NewInt(int64(i)))
+		orig.updateStateObject(obj)
+	}
+
+	for i := 0; i < b.N; i++ {
+		copy := orig.CopyWithSyncPool()
+		copy.ResetSyncPool()
+	}
+}
+
 func TestSnapshotRandom(t *testing.T) {
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
