@@ -1015,27 +1015,11 @@ func (s *StateDB) doCopy(state *StateDB) *StateDB {
 	return state
 }
 
-var objPendingPool = sync.Pool{
-	New: func() interface{} { return make(map[common.Address]struct{}, defaultNumOfSlots) },
-}
-
-var objDirtyPool = sync.Pool{
-	New: func() interface{} { return make(map[common.Address]struct{}, defaultNumOfSlots) },
-}
-
-var journalPool = sync.Pool{
-	New: func() interface{} {
-		return &journal{
-			dirties: make(map[common.Address]int, defaultNumOfSlots),
-			entries: make([]journalEntry, 0, defaultNumOfSlots),
-		}
-	},
-}
-
 var statePool = sync.Pool{
 	New: func() interface{} {
 		return &StateDB{
 			hasher:              crypto.NewKeccakState(),
+			stateObjects:        make(map[common.Address]*StateObject, defaultNumOfSlots),
 			stateObjectsPending: make(map[common.Address]struct{}, defaultNumOfSlots),
 			stateObjectsDirty:   make(map[common.Address]struct{}, defaultNumOfSlots),
 			logs:                make(map[common.Hash][]*types.Log, defaultNumOfSlots),
@@ -1055,7 +1039,6 @@ func (s *StateDB) CopyWithSyncPool() *StateDB {
 
 	state.db = s.db
 	state.trie = s.db.CopyTrie(s.trie)
-	state.stateObjects = make(map[common.Address]*StateObject, len(s.journal.dirties))
 	state.storagePool = s.storagePool
 	state.refund = s.refund
 	state.logSize = s.logSize
@@ -1065,6 +1048,9 @@ func (s *StateDB) CopyWithSyncPool() *StateDB {
 
 // ResetSyncPool puts the data back to the sync pools.
 func (s *StateDB) ResetSyncPool() {
+	for key := range s.stateObjects {
+		delete(s.stateObjects, key)
+	}
 	for key := range s.stateObjectsPending {
 		delete(s.stateObjectsPending, key)
 	}
