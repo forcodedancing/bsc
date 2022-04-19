@@ -1371,7 +1371,10 @@ func (s *StateDB) Prepare(thash, bhash common.Hash, ti int) {
 
 func (s *StateDB) clearJournalAndRefund() {
 	if len(s.journal.entries) > 0 {
-		s.journal = newJournal()
+		for key := range s.journal.dirties {
+			delete(s.journal.dirties, key)
+		}
+		s.journal.entries = s.journal.entries[:0]
 		s.refund = 0
 	}
 	s.validRevisions = s.validRevisions[:0] // Snapshots can be created without journal entires
