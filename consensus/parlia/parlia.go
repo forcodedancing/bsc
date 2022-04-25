@@ -834,9 +834,9 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 
 	// Bail out if we're unauthorized to sign a block
-	if _, authorized := snap.Validators[val]; !authorized {
-		return errUnauthorizedValidator
-	}
+	//if _, authorized := snap.Validators[val]; !authorized {
+	//	return errUnauthorizedValidator
+	//}
 
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {
