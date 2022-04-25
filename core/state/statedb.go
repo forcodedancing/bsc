@@ -1330,6 +1330,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 					for k, v := range s.snapAccounts {
 						accountData[crypto.Keccak256Hash(k[:])] = v
 					}
+					time.Sleep(100 * time.Millisecond)
 					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
 				}
 			}
