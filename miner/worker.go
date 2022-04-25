@@ -1012,6 +1012,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	if s.IsPipeCommit() {
 		parent := w.chain.CurrentBlock()
 		s.CorrectAccountsRootFor(parent.Root())
+		s.CorrectAccountsRoot()
 	}
 
 	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(w.current.header), s, w.current.txs, uncles, w.current.receipts)
