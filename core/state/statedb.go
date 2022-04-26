@@ -1480,6 +1480,11 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				if s.pipeCommit {
 					defer close(snapUpdated)
 				}
+				if s.pipeCommit {
+					// State verification pipeline - accounts root are not calculated here, just populate needed fields for process
+					s.PopulateSnapAccountAndStorage()
+				}
+
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
