@@ -989,6 +989,16 @@ func (s *StateDB) CorrectAccountsRoot() {
 
 //CorrectAccountsRootFor will fix account roots for given blockRoot in pipecommit mode
 func (s *StateDB) CorrectAccountsRootFor(root common.Hash) {
+	if accounts, err := s.snaps.Snapshot(root).Accounts(); err == nil && accounts != nil {
+		for _, obj := range s.stateObjects {
+			if !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
+				if account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]; exist && len(account.Root) != 0 {
+					obj.data.Root = common.BytesToHash(account.Root)
+				}
+			}
+		}
+	}
+
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
 			if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
