@@ -999,15 +999,15 @@ func (s *StateDB) CorrectAccountsRootFor(root common.Hash) {
 		}
 	}
 
-	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
-			if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
-				if acc != nil && len(acc.Root) != 0 {
-					obj.data.Root = common.BytesToHash(acc.Root)
-				}
-			}
-		}
-	}
+	//for addr := range s.stateObjectsPending {
+	//	if obj := s.stateObjects[addr]; !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
+	//		if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
+	//			if acc != nil && len(acc.Root) != 0 {
+	//				obj.data.Root = common.BytesToHash(acc.Root)
+	//			}
+	//		}
+	//	}
+	//}
 }
 
 //PopulateSnapAccountAndStorage tries to populate required accounts and storages for pipecommit
@@ -1353,7 +1353,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 					for k, v := range s.snapAccounts {
 						accountData[crypto.Keccak256Hash(k[:])] = v
 					}
-					time.Sleep(100 * time.Millisecond)
+					//time.Sleep(100 * time.Millisecond)
 					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
 				}
 			}
