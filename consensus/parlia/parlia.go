@@ -565,9 +565,9 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 		return errCoinBaseMisMatch
 	}
 
-	if _, ok := snap.Validators[signer]; !ok {
-		return errUnauthorizedValidator
-	}
+	//if _, ok := snap.Validators[signer]; !ok {
+	//	return errUnauthorizedValidator
+	//}
 
 	for seen, recent := range snap.Recents {
 		if recent == signer {
@@ -834,9 +834,9 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 
 	// Bail out if we're unauthorized to sign a block
-	if _, authorized := snap.Validators[val]; !authorized {
-		return errUnauthorizedValidator
-	}
+	//if _, authorized := snap.Validators[val]; !authorized {
+	//	return errUnauthorizedValidator
+	//}
 
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {
@@ -936,9 +936,9 @@ func (p *Parlia) SignRecently(chain consensus.ChainReader, parent *types.Header)
 	}
 
 	// Bail out if we're unauthorized to sign a block
-	if _, authorized := snap.Validators[p.val]; !authorized {
-		return true, errUnauthorizedValidator
-	}
+	//if _, authorized := snap.Validators[p.val]; !authorized {
+	//	return true, errUnauthorizedValidator
+	//}
 
 	// If we're amongst the recent signers, wait for the next block
 	number := parent.Number.Uint64() + 1
