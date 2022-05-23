@@ -1430,6 +1430,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				s.snaps.Snapshot(s.stateRoot).MarkValid()
 				close(verified)
 			} else {
+				log.Error("DG - commitErr", "err", commitErr)
 				// The blockchain will do the further rewind if write block not finish yet
 				close(verified)
 				if failPostCommitFunc != nil {

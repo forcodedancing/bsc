@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
@@ -269,6 +271,9 @@ func (dl *diffLayer) WaitAndGetVerifyRes() bool {
 		return true
 	}
 	<-dl.verifiedCh
+	if !dl.valid {
+		log.Error("DG - WaitAndGetVerifyRes invalid", "root", dl.Root().Hex())
+	}
 	return dl.valid
 }
 
