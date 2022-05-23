@@ -363,6 +363,8 @@ func (s *StateObject) finalise(prefetch bool) {
 				s.data.Root = common.BytesToHash(acc.Root)
 				s.rootCorrected = true
 			}
+		} else {
+			panic(err)
 		}
 	}
 

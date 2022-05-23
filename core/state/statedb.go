@@ -984,10 +984,12 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 	}
 
 	if snapshot == nil {
+		log.Warn("DG - snapshot is nil", "blockRoot", blockRoot.Hex())
 		return
 	}
 	if accounts, err := snapshot.Accounts(); err == nil && accounts != nil {
 		for _, obj := range s.stateObjects {
+			log.Warn("D2G - obj detail", "deleted", obj.deleted, "rootCorrected", obj.rootCorrected, "root", obj.data.Root.Hex())
 			if !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
 				if account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]; exist && len(account.Root) != 0 {
 					obj.data.Root = common.BytesToHash(account.Root)
@@ -995,6 +997,8 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 				}
 			}
 		}
+	} else {
+		log.Warn("DG - error to find accounts", "err", err, "accounts", len(accounts))
 	}
 }
 
