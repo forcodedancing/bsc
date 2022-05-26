@@ -1017,6 +1017,10 @@ func (s *StateDB) PopulateSnapAccountAndStorage() {
 					root = dummyRoot
 				}
 				s.snapAccounts[obj.address] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, root, obj.data.CodeHash)
+				if obj.rootCorrected == true {
+					log.Error("DDGG", "obj.rootCorrected", obj.rootCorrected)
+				}
+				obj.rootCorrected = false
 			}
 		}
 	}
