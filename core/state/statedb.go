@@ -1349,6 +1349,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 		diffLayer = &types.DiffLayer{}
 	}
 	if s.pipeCommit {
+		log.Info("pipecommit enabled", "pipecommit", s.pipeCommit)
 		// async commit the MPT
 		verified = make(chan struct{})
 		snapUpdated = make(chan struct{})
