@@ -142,9 +142,9 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			if err := statedb.WaitPipeVerification(); err != nil {
 				return err
 			}
-			time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 			statedb.CorrectAccountsRoot(common.Hash{})
-			time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 			statedb.Finalise(v.config.IsEIP158(header.Number))
 			return nil
 		})

@@ -175,7 +175,12 @@ func newStateDB(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, 
 		hasher:              crypto.NewKeccakState(),
 	}
 	if sdb.snaps != nil {
-		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil {
+		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil { // 1. will sdb.snap contains dummyRoot 2. impact
+
+			if sdb.snap.AccountsCorrected() == false {
+				log.Warn("sdb.snap.AccountsCorrected is false", "AccountsCorrected", false)
+			}
+
 			sdb.snapDestructs = make(map[common.Address]struct{})
 			sdb.snapAccounts = make(map[common.Address][]byte)
 			sdb.snapStorage = make(map[common.Address]map[string][]byte)
@@ -987,6 +992,7 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 	if snapshot == nil {
 		return
 	}
+	// any issue here
 	if accounts, err := snapshot.Accounts(); err == nil && accounts != nil {
 		for _, obj := range s.stateObjects {
 			if !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
@@ -994,6 +1000,24 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 					obj.data.Root = common.BytesToHash(account.Root)
 					obj.rootCorrected = true
 				}
+			}
+		}
+	}
+
+	for addr := range s.stateObjectsPending {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			if obj.data.Root == dummyRoot {
+				log.Error("uncorrected stateObjectsPending", "stateObjectsPending", len(s.stateObjectsPending))
+				panic("uncorrected stateObjectsPending")
+			}
+		}
+	}
+
+	for addr := range s.stateObjectsDirty {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			if obj.data.Root == dummyRoot {
+				log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
+				panic("uncorrected stateObjectsDirty")
 			}
 		}
 	}
@@ -1336,16 +1360,16 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 			if s.pipeCommit {
 				<-snapUpdated
 				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
-				time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				s.AccountsIntermediateRoot()
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					accountData := make(map[common.Hash][]byte)
 					for k, v := range s.snapAccounts {
 						accountData[crypto.Keccak256Hash(k[:])] = v
 					}
-					time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
-					time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				}
 			}
 
@@ -1428,9 +1452,11 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 		if s.pipeCommit {
 			if commitErr == nil {
 				s.snaps.Snapshot(s.stateRoot).MarkValid()
+				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				close(verified)
 			} else {
 				// The blockchain will do the further rewind if write block not finish yet
+				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				close(verified)
 				if failPostCommitFunc != nil {
 					failPostCommitFunc()
@@ -1481,9 +1507,8 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				if s.pipeCommit {
 					defer close(snapUpdated)
 					// State verification pipeline - accounts root are not calculated here, just populate needed fields for process
-					time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 					s.PopulateSnapAccountAndStorage()
-					time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
 				}
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
