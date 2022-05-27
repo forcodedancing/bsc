@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"runtime"
 	"sort"
 	"sync"
@@ -1360,16 +1359,16 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 			if s.pipeCommit {
 				<-snapUpdated
 				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
-				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+				//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				s.AccountsIntermediateRoot()
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					accountData := make(map[common.Hash][]byte)
 					for k, v := range s.snapAccounts {
 						accountData[crypto.Keccak256Hash(k[:])] = v
 					}
-					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+					//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
-					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+					//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				}
 			}
 
@@ -1452,11 +1451,13 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 		if s.pipeCommit {
 			if commitErr == nil {
 				s.snaps.Snapshot(s.stateRoot).MarkValid()
-				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+				//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				close(verified)
 			} else {
+				log.Error("commitErr", "err", commitErr)
+				panic("commitErr")
 				// The blockchain will do the further rewind if write block not finish yet
-				time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+				//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 				close(verified)
 				if failPostCommitFunc != nil {
 					failPostCommitFunc()
@@ -1507,7 +1508,7 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				if s.pipeCommit {
 					defer close(snapUpdated)
 					// State verification pipeline - accounts root are not calculated here, just populate needed fields for process
-					time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+					//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 					s.PopulateSnapAccountAndStorage()
 				}
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
