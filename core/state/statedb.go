@@ -1335,12 +1335,14 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 			if s.pipeCommit {
 				<-snapUpdated
 				// Due to state verification pipeline, the accounts roots are not updated, leading to the data in the difflayer is not correct, capture the correct data here
+				time.Sleep(30 * time.Millisecond)
 				s.AccountsIntermediateRoot()
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					accountData := make(map[common.Hash][]byte)
 					for k, v := range s.snapAccounts {
 						accountData[crypto.Keccak256Hash(k[:])] = v
 					}
+					time.Sleep(30 * time.Millisecond)
 					s.snaps.Snapshot(s.expectedRoot).CorrectAccounts(accountData)
 				}
 			}
