@@ -1004,32 +1004,50 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 	}
 
 	pendingDummy := 0
+	pendingCanBeFixed := true
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			if obj.data.Root == dummyRoot {
 				pendingDummy++
 				//panic("uncorrected stateObjectsPending")
+				if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
+					if acc != nil && len(acc.Root) != 0 {
+					} else {
+						pendingCanBeFixed = false
+					}
+				} else {
+					pendingCanBeFixed = false
+				}
 			}
 		}
 	}
 
 	if pendingDummy > 0 {
-		log.Error("uncorrected stateObjectsPending", "stateObjectsPending", len(s.stateObjectsPending))
+		log.Error("uncorrected stateObjectsPending", "stateObjectsPending", len(s.stateObjectsPending), "pendingDummy", pendingDummy, "pendingCanBeFixed", pendingCanBeFixed)
 	}
 
 	dirtyDummy := 0
+	dummyCanFixed := true
 	for addr := range s.stateObjectsDirty {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			if obj.data.Root == dummyRoot {
 				dirtyDummy++
 				//log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
 				//panic("uncorrected stateObjectsDirty")
+				if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
+					if acc != nil && len(acc.Root) != 0 {
+					} else {
+						dummyCanFixed = false
+					}
+				} else {
+					dummyCanFixed = false
+				}
 			}
 		}
 	}
 
 	if dirtyDummy > 0 {
-		log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
+		log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty), "dirtyDummy", dirtyDummy, "dummyCanFixed", dummyCanFixed)
 	}
 }
 
