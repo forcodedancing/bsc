@@ -1003,22 +1003,33 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 		}
 	}
 
+	pendingDummy := 0
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			if obj.data.Root == dummyRoot {
-				log.Error("uncorrected stateObjectsPending", "stateObjectsPending", len(s.stateObjectsPending))
-				panic("uncorrected stateObjectsPending")
+				pendingDummy++
+				//panic("uncorrected stateObjectsPending")
 			}
 		}
 	}
 
+	if pendingDummy > 0 {
+		log.Error("uncorrected stateObjectsPending", "stateObjectsPending", len(s.stateObjectsPending))
+	}
+
+	dirtyDummy := 0
 	for addr := range s.stateObjectsDirty {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			if obj.data.Root == dummyRoot {
-				log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
-				panic("uncorrected stateObjectsDirty")
+				dirtyDummy++
+				//log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
+				//panic("uncorrected stateObjectsDirty")
 			}
 		}
+	}
+
+	if dirtyDummy > 0 {
+		log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty))
 	}
 }
 
