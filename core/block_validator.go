@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -142,6 +144,7 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 				return err
 			}
 			//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
+			log.Info("correcting block", "block", block.NumberU64())
 			statedb.CorrectAccountsRoot(common.Hash{})
 			//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
 			statedb.Finalise(v.config.IsEIP158(header.Number))

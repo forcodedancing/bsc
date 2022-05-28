@@ -1013,9 +1013,11 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 				if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
 					if acc != nil && len(acc.Root) != 0 {
 					} else {
+						log.Error("pending object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 						pendingCanBeFixed = false
 					}
 				} else {
+					log.Error("pending object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 					pendingCanBeFixed = false
 				}
 			}
@@ -1037,9 +1039,11 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 				if acc, err := s.snap.Account(crypto.HashData(s.hasher, obj.address.Bytes())); err == nil {
 					if acc != nil && len(acc.Root) != 0 {
 					} else {
+						log.Error("dirty object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 						dummyCanFixed = false
 					}
 				} else {
+					log.Error("dirty object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 					dummyCanFixed = false
 				}
 			}
@@ -1485,6 +1489,9 @@ func (s *StateDB) Commit(failPostCommitFunc func(), postCommitFuncs ...func() er
 				close(verified)
 			} else {
 				log.Error("commitErr", "err", commitErr)
+				log.Error("commitErr", "err", commitErr)
+				log.Error("commitErr", "err", commitErr)
+				time.Sleep(20 * time.Millisecond)
 				panic("commitErr")
 				// The blockchain will do the further rewind if write block not finish yet
 				//time.Sleep(time.Duration(rand.Int31n(20)) * time.Millisecond)
