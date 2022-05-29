@@ -1020,6 +1020,13 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 					log.Error("pending object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 					pendingCanBeFixed = false
 				}
+
+				if pendingCanBeFixed == false {
+					if accounts, err := snapshot.Accounts(); err == nil && accounts != nil {
+						account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]
+						log.Error("pending object cannot be fixed - snapshot", "address", obj.address.Hex(), "acc", account, "exist", exist)
+					}
+				}
 			}
 		}
 	}
