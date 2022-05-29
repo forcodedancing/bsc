@@ -1020,13 +1020,6 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 					log.Error("pending object cannot be fixed", "address", obj.address.Hex(), "acc", acc, "root", acc.Root, "err", err)
 					pendingCanBeFixed = false
 				}
-
-				if pendingCanBeFixed == false {
-					if accounts, err := snapshot.Accounts(); err == nil && accounts != nil {
-						account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]
-						log.Error("pending object cannot be fixed - snapshot", "address", obj.address.Hex(), "acc", account, "exist", exist)
-					}
-				}
 			}
 		}
 	}
@@ -1059,6 +1052,20 @@ func (s *StateDB) CorrectAccountsRoot(blockRoot common.Hash) {
 
 	if dirtyDummy > 0 {
 		log.Error("uncorrected stateObjectsDirty", "stateObjectsDirty", len(s.stateObjectsDirty), "dirtyDummy", dirtyDummy, "dummyCanFixed", dummyCanFixed)
+	}
+
+	if pendingDummy > 0 || dirtyDummy > 0 {
+		if accounts, err := snapshot.Accounts(); err == nil && accounts != nil {
+			for _, obj := range s.stateObjects {
+				if !obj.deleted && !obj.rootCorrected && obj.data.Root == dummyRoot {
+					if account, exist := accounts[crypto.Keccak256Hash(obj.address[:])]; exist {
+						log.Error("correct account root again", "address", obj.address.Hex(), "account", account, "root", account.Root, "err", err)
+						obj.data.Root = common.BytesToHash(account.Root)
+						obj.rootCorrected = true
+					}
+				}
+			}
+		}
 	}
 }
 
