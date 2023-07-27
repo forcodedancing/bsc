@@ -346,6 +346,14 @@ func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
 
-func (b *LesApiBackend) ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error {
+func (b *LesApiBackend) ProposedBlock(context.Context, string, *big.Int, common.Hash, *big.Int, uint64, uint64, types.Transactions) error {
+	return nil
+}
+
+func (b *LesApiBackend) AddRelay(context.Context, string) error {
+	return nil
+}
+
+func (b *LesApiBackend) RemoveRelay(context.Context, string) error {
 	return nil
 }

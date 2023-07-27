@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/blxr/version"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -45,6 +46,85 @@ type Backend interface {
 	TxPool() *core.TxPool
 }
 
+type ClientMap map[string]*rpc.Client
+
+type ClientMapping struct {
+	mx        *sync.RWMutex
+	clientMap ClientMap
+}
+
+func NewClientMap(relays []string) *ClientMapping {
+	c := &ClientMapping{
+		mx:        new(sync.RWMutex),
+		clientMap: make(ClientMap),
+	}
+
+	for _, relay := range relays {
+		client, err := rpc.Dial(relay)
+		if err != nil {
+			log.Warn("Failed to dial MEV relay", "dest", relay, "err", err)
+			continue
+		}
+
+		c.clientMap[relay] = client
+	}
+
+	return c
+}
+
+func (c *ClientMapping) Len() int {
+	c.mx.RLock()
+	defer c.mx.RUnlock()
+	return len(c.clientMap)
+}
+
+func (c *ClientMapping) Mapping() ClientMap {
+	clientMap := make(ClientMap, len(c.clientMap))
+
+	c.mx.RLock()
+	for k, v := range c.clientMap {
+		clientMap[k] = v
+	}
+	c.mx.RUnlock()
+
+	return clientMap
+}
+
+func (c *ClientMapping) Get(relay string) (*rpc.Client, bool) {
+	c.mx.RLock()
+	client, ok := c.clientMap[relay]
+	c.mx.RUnlock()
+
+	return client, ok
+}
+
+func (c *ClientMapping) Add(relay string) (*rpc.Client, error) {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	client, err := rpc.Dial(relay)
+	if err != nil {
+		return nil, err
+	}
+
+	c.clientMap[relay] = client
+
+	return client, nil
+}
+
+func (c *ClientMapping) Remove(relay string) error {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	if _, ok := c.clientMap[relay]; !ok {
+		return fmt.Errorf("relay %s not found", relay)
+	}
+
+	delete(c.clientMap, relay)
+
+	return nil
+}
+
 // Config is the configuration parameters of mining.
 type Config struct {
 	Etherbase     common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
@@ -59,10 +139,10 @@ type Config struct {
 	Noverify      bool           // Disable remote mining solution verification(only useful in ethash).
 	VoteEnable    bool           // Whether to vote when mining
 
-	MEVRelays                   map[string]*rpc.Client // RPC clients to register validator each epoch
-	ProposedBlockUri            string                 // received proposedBlocks on that uri
-	ProposedBlockNamespace      string                 // define the namespace of proposedBlock
-	RegisterValidatorSignedHash []byte                 // signed value of crypto.Keccak256([]byte(ProposedBlockUri))
+	MEVRelays                   []string `toml:",omitempty"` // RPC clients to register validator each epoch
+	ProposedBlockUri            string   `toml:",omitempty"` // received proposedBlocks on that uri
+	ProposedBlockNamespace      string   `toml:",omitempty"` // define the namespace of proposedBlock
+	RegisterValidatorSignedHash []byte   `toml:"-"`          // signed value of crypto.Keccak256([]byte(ProposedBlockUri))
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -78,7 +158,7 @@ type Miner struct {
 
 	wg sync.WaitGroup
 
-	mevRelays              map[string]*rpc.Client
+	mevRelays              *ClientMapping
 	proposedBlockUri       string
 	proposedBlockNamespace string
 	signedProposedBlockUri []byte
@@ -94,7 +174,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		stopCh:  make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, false),
 
-		mevRelays:              config.MEVRelays,
+		mevRelays:              NewClientMap(config.MEVRelays),
 		proposedBlockUri:       config.ProposedBlockUri,
 		proposedBlockNamespace: config.ProposedBlockNamespace,
 		signedProposedBlockUri: config.RegisterValidatorSignedHash,
@@ -325,22 +405,55 @@ func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlo
 func (miner *Miner) registerValidator() {
 	log.Info("register validator to MEV relays")
 	registerValidatorArgs := &ethapi.RegisterValidatorArgs{
-		Data:      []byte(miner.proposedBlockUri),
-		Signature: miner.signedProposedBlockUri,
-		Namespace: miner.proposedBlockNamespace,
+		Data:       []byte(miner.proposedBlockUri),
+		Signature:  miner.signedProposedBlockUri,
+		Namespace:  miner.proposedBlockNamespace,
+		CommitHash: version.CommitHash(),
 	}
-	for dest, destClient := range miner.mevRelays {
+	for dest, destClient := range miner.mevRelays.Mapping() {
 		go func(dest string, destinationClient *rpc.Client, registerValidatorArgs *ethapi.RegisterValidatorArgs) {
 			var result any
 
 			if err := destinationClient.Call(
 				&result, "eth_registerValidator", registerValidatorArgs,
 			); err != nil {
-				log.Warn("Failed to register validator to MEV relay ", "dest", dest, "err", err)
+				log.Warn("Failed to register validator to MEV relay", "dest", dest, "err", err)
 				return
 			}
 
 			log.Debug("register validator to MEV relay", "dest", dest, "result", result)
 		}(dest, destClient, registerValidatorArgs)
 	}
+}
+
+func (miner *Miner) AddRelay(relay string) error {
+	client, err := miner.mevRelays.Add(relay)
+	if err != nil {
+		return err
+	}
+
+	log.Info("register validator to MEV relay", "dest", relay)
+	registerValidatorArgs := &ethapi.RegisterValidatorArgs{
+		Data:       []byte(miner.proposedBlockUri),
+		Signature:  miner.signedProposedBlockUri,
+		Namespace:  miner.proposedBlockNamespace,
+		CommitHash: version.CommitHash(),
+	}
+
+	var result any
+
+	if err = client.Call(
+		&result, "eth_registerValidator", registerValidatorArgs,
+	); err != nil {
+		log.Warn("Failed to register validator to MEV relay", "dest", relay, "err", err)
+		return err
+	}
+
+	log.Debug("register validator to MEV relay", "dest", relay, "result", result)
+
+	return nil
+}
+
+func (miner *Miner) RemoveRelay(relay string) error {
+	return miner.mevRelays.Remove(relay)
 }

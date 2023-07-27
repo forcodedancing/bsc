@@ -40,6 +40,8 @@ import (
 // Backend interface provides the common API services (that are provided by
 // both full and light clients) with access to necessary functions.
 type Backend interface {
+	MEVBackend
+
 	// General Ethereum API
 	SyncProgress() ethereum.SyncProgress
 
@@ -85,7 +87,6 @@ type Backend interface {
 	TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-	ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error
 
 	// Filter API
 	BloomStatus() (uint64, uint64)
@@ -99,6 +100,14 @@ type Backend interface {
 
 	ChainConfig() *params.ChainConfig
 	Engine() consensus.Engine
+}
+
+// MEVBackend interface provides the common API services (that are provided by
+// both full and light clients) with access to MEV functions.
+type MEVBackend interface {
+	ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error
+	AddRelay(ctx context.Context, mevRelay string) error
+	RemoveRelay(ctx context.Context, mevRelay string) error
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

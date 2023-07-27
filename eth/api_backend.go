@@ -409,6 +409,29 @@ func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(block, txIndex, reexec)
 }
 
-func (b *EthAPIBackend) ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error {
-	return b.eth.miner.ProposedBlock(MEVRelay, blockNumber, prevBlockHash, reward, gasLimit, gasUsed, txs)
+func (b *EthAPIBackend) ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.eth.miner.ProposedBlock(mevRelay, blockNumber, prevBlockHash, reward, gasLimit, gasUsed, txs)
+	}
+}
+
+func (b *EthAPIBackend) AddRelay(ctx context.Context, mevRelay string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.eth.miner.AddRelay(mevRelay)
+	}
+}
+
+func (b *EthAPIBackend) RemoveRelay(ctx context.Context, mevRelay string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.eth.miner.RemoveRelay(mevRelay)
+	}
 }

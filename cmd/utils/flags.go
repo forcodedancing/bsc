@@ -74,7 +74,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 func init() {
@@ -1629,17 +1628,8 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 		cfg.VoteEnable = true
 	}
 
-	cfg.MEVRelays = make(map[string]*rpc.Client)
 	if ctx.GlobalIsSet(MinerMEVRelaysFlag.Name) {
-		for _, dest := range ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name) {
-			client, err := rpc.Dial(dest)
-			if err != nil {
-				log.Warn("Failed to connect to propose block destination", "err", err, "dest", dest)
-				continue
-			}
-
-			cfg.MEVRelays[dest] = client
-		}
+		cfg.MEVRelays = ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name)
 	}
 }
 
@@ -1671,7 +1661,11 @@ func setMEV(ctx *cli.Context, ks *keystore.KeyStore, cfg *miner.Config) {
 		if ctx.GlobalIsSet(MinerMEVProposedBlockUriFlag.Name) {
 			cfg.ProposedBlockUri = ctx.GlobalString(MinerMEVProposedBlockUriFlag.Name)
 		}
-		cfg.ProposedBlockNamespace = ctx.GlobalString(MinerMEVProposedBlockNamespaceFlag.Name)
+
+		if cfg.ProposedBlockNamespace == "" && ctx.GlobalIsSet(MinerMEVProposedBlockNamespaceFlag.Name) {
+			cfg.ProposedBlockNamespace = ctx.GlobalString(MinerMEVProposedBlockNamespaceFlag.Name)
+		}
+
 		account, err := ks.Find(accounts.Account{Address: cfg.Etherbase})
 		if err != nil {
 			Fatalf("Could not find the validator public address %v to sign the registerValidator message, %v", cfg.Etherbase, err)
