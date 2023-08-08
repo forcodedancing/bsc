@@ -369,8 +369,11 @@ func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscript
 }
 
 // ProposedBlock add the block to the list of works
-func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error {
-	var isBlockSkipped bool
+func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) (simDuration time.Duration, err error) {
+	var (
+		isBlockSkipped bool
+		simWork        *bestProposedWork
+	)
 	currentGasLimit := atomic.LoadUint64(miner.worker.currentGasLimit)
 	defer func() {
 		log.Debug("Received proposedBlock",
@@ -384,13 +387,15 @@ func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlo
 			"isBlockSkipped", isBlockSkipped,
 			"currentGasLimit", currentGasLimit,
 			"timestamp", time.Now().UTC().Format(timestampFormat),
+			"simDuration", simDuration,
 		)
 	}()
 	isBlockSkipped = gasUsed > currentGasLimit
 	if isBlockSkipped {
-		return fmt.Errorf("proposed block gasUsed %v exceeds the current block gas limit %v", gasUsed, currentGasLimit)
+		err = fmt.Errorf("proposed block gasUsed %v exceeds the current block gas limit %v", gasUsed, currentGasLimit)
+		return
 	}
-	miner.worker.proposedCh <- &ProposedBlockArgs{
+	args := &ProposedBlockArgs{
 		mevRelay:      MEVRelay,
 		blockNumber:   blockNumber,
 		prevBlockHash: prevBlockHash,
@@ -399,7 +404,21 @@ func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlo
 		gasUsed:       gasUsed,
 		txs:           txs,
 	}
-	return nil
+	simWork, simDuration, err = miner.worker.simulateProposedBlock(args)
+	if err != nil {
+		err = fmt.Errorf("processing and simulating proposedBlock failed, %v", err)
+		return
+	}
+	if simWork == nil {
+		//  do not return error, when the block is skipped
+		return
+	}
+	miner.worker.proposedCh <- &ProposedBlock{
+		args:          args,
+		simulatedWork: simWork,
+		simDuration:   simDuration,
+	}
+	return
 }
 
 func (miner *Miner) registerValidator() {

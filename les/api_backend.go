@@ -346,8 +346,8 @@ func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
 
-func (b *LesApiBackend) ProposedBlock(context.Context, string, *big.Int, common.Hash, *big.Int, uint64, uint64, types.Transactions) error {
-	return nil
+func (b *LesApiBackend) ProposedBlock(context.Context, string, *big.Int, common.Hash, *big.Int, uint64, uint64, types.Transactions) (simDuration time.Duration, err error) {
+	return
 }
 
 func (b *LesApiBackend) AddRelay(context.Context, string) error {

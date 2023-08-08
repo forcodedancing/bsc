@@ -52,7 +52,12 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
-const UnHealthyTimeout = 5 * time.Second
+const (
+	UnHealthyTimeout = 5 * time.Second
+
+	// timestamp format
+	timestampFormat = "2006-01-02 15:04:05.000000"
+)
 
 // max is a helper function which returns the larger of the two given integers.
 func max(a, b int64) int64 {
@@ -1408,18 +1413,27 @@ type ProposedBlockArgs struct {
 	Payload       []hexutil.Bytes `json:"payload"`
 }
 
-// ProposedBlock will submit the block to the miner worker
-func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) error {
+type ProposedBlockResponse struct {
+	ReceivedAt        string        `json:"receivedAt"`
+	SimulatedDuration time.Duration `json:"simulatedDuration"`
+	ResponseSentAt    string        `json:"responseSentAt"`
+}
+
+// ProposedBlock will validate the block and will submit it to the miner worker
+func (s *PublicBlockChainAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (*ProposedBlockResponse, error) {
 	return proposedBlock(ctx, args, s.b.CurrentBlock(), s.b)
 }
 
-func proposedBlock(ctx context.Context, args ProposedBlockArgs, currentBlock *types.Block, b MEVBackend) error {
-	var txs types.Transactions
+func proposedBlock(ctx context.Context, args ProposedBlockArgs, currentBlock *types.Block, b MEVBackend) (*ProposedBlockResponse, error) {
+	var (
+		receivedAt = time.Now().UTC()
+		txs        types.Transactions
+	)
 	if len(args.Payload) == 0 {
-		return errors.New("block missing txs")
+		return nil, errors.New("block missing txs")
 	}
 	if args.BlockNumber == 0 {
-		return errors.New("block missing blockNumber")
+		return nil, errors.New("block missing blockNumber")
 	}
 
 	blockOnChain := currentBlock.Number()
@@ -1427,16 +1441,25 @@ func proposedBlock(ctx context.Context, args ProposedBlockArgs, currentBlock *ty
 
 	if proposedBlockNumber.Cmp(blockOnChain) < 1 {
 		log.Info("Validating ProposedBlock failed", "blockNumber", args.BlockNumber, "onChainBlockNumber", blockOnChain, "onChainBlockHash", currentBlock.Hash(), "prevBlockHash", args.PrevBlockHash, "mevRelay", args.MEVRelay)
-		return fmt.Errorf("blockNumber is incorrect. proposedBlockNumber: %v onChainBlockNumber: %v onChainBlockHash %v", args.BlockNumber, blockOnChain, currentBlock.Hash().String())
+		return nil, fmt.Errorf("blockNumber is incorrect. proposedBlockNumber: %v onChainBlockNumber: %v onChainBlockHash %v", args.BlockNumber, blockOnChain, currentBlock.Hash().String())
 	}
 	for _, encodedTx := range args.Payload {
 		tx := new(types.Transaction)
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
-			return err
+			return nil, err
 		}
 		txs = append(txs, tx)
 	}
-	return b.ProposedBlock(ctx, args.MEVRelay, proposedBlockNumber, args.PrevBlockHash, args.BlockReward, args.GasLimit, args.GasUsed, txs)
+
+	simDuration, err := b.ProposedBlock(ctx, args.MEVRelay, proposedBlockNumber, args.PrevBlockHash, args.BlockReward, args.GasLimit, args.GasUsed, txs)
+	if err != nil {
+		return nil, err
+	}
+	return &ProposedBlockResponse{
+		ReceivedAt:        receivedAt.Format(timestampFormat),
+		SimulatedDuration: simDuration,
+		ResponseSentAt:    time.Now().UTC().Format(timestampFormat),
+	}, nil
 }
 
 type AddRelayArgs struct {
@@ -2526,7 +2549,7 @@ func NewPublicMEVAPI(b Backend) *PublicMEVAPI {
 }
 
 // ProposedBlock will submit the block to the miner worker
-func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) error {
+func (s *PublicMEVAPI) ProposedBlock(ctx context.Context, args ProposedBlockArgs) (*ProposedBlockResponse, error) {
 	return proposedBlock(ctx, args, s.b.CurrentBlock(), s.b)
 }
 

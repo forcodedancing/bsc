@@ -105,7 +105,7 @@ type Backend interface {
 // MEVBackend interface provides the common API services (that are provided by
 // both full and light clients) with access to MEV functions.
 type MEVBackend interface {
-	ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) error
+	ProposedBlock(ctx context.Context, MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) (simDuration time.Duration, err error)
 	AddRelay(ctx context.Context, mevRelay string) error
 	RemoveRelay(ctx context.Context, mevRelay string) error
 }

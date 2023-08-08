@@ -194,6 +194,13 @@ type ProposedBlockArgs struct {
 	txs           types.Transactions
 }
 
+// ProposedBlock defines the argument of a proposed block and simulated work
+type ProposedBlock struct {
+	args          *ProposedBlockArgs
+	simulatedWork *bestProposedWork
+	simDuration   time.Duration
+}
+
 // worker is the main object which takes care of submitting new work to consensus engine
 // and gathering the sealing result.
 type worker struct {
@@ -217,7 +224,7 @@ type worker struct {
 	// Channels
 	newWorkCh          chan *newWorkReq
 	getWorkCh          chan *getWorkReq
-	proposedCh         chan *ProposedBlockArgs
+	proposedCh         chan *ProposedBlock
 	taskCh             chan *task
 	resultCh           chan *types.Block
 	startCh            chan struct{}
@@ -306,7 +313,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		chainSideCh:           make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:             make(chan *newWorkReq),
 		getWorkCh:             make(chan *getWorkReq),
-		proposedCh:            make(chan *ProposedBlockArgs),
+		proposedCh:            make(chan *ProposedBlock),
 		taskCh:                make(chan *task),
 		resultCh:              make(chan *types.Block, resultQueueSize),
 		exitCh:                make(chan struct{}),
@@ -775,47 +782,42 @@ func (w *worker) proposedLoop() {
 		select {
 		case req := <-w.proposedCh:
 			var (
-				reward = new(big.Int).Set(req.blockReward)
+				blockNum      = req.args.blockNumber.Uint64()
+				prevBlockHash = req.args.prevBlockHash.String()
 			)
 			w.bestProposedBlockLock.RLock()
-			if bestWorks, ok := w.bestProposedBlockInfo[req.blockNumber.Uint64()]; ok && bestWorks != nil {
-				previousProposedBlockWork, exist := bestWorks[req.prevBlockHash.String()]
-				if exist && previousProposedBlockWork != nil && previousProposedBlockWork.reward != nil {
-					if previousProposedBlockWork.reward.Cmp(reward) > 0 {
-						log.Debug("Skipping proposedBlock", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "newProposedBlockReward", reward, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockGasLimit", req.gasLimit, "newProposedBlockGasUsed", req.gasUsed, "newProposedBlockTxCount", len(req.txs), "mevRelay", req.mevRelay, "timestamp", time.Now().UTC().Format(timestampFormat))
+			if bestWorks, ok := w.bestProposedBlockInfo[blockNum]; ok && bestWorks != nil {
+				previousProposedBlockWork, exist := bestWorks[prevBlockHash]
+				if exist && previousProposedBlockWork != nil && previousProposedBlockWork.reward != nil && req.simulatedWork != nil && req.simulatedWork.reward != nil {
+					if previousProposedBlockWork.reward.Cmp(req.simulatedWork.reward) > 0 {
+						log.Debug("Skipping proposedBlock", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "newProposedBlockReward", req.simulatedWork.reward, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockGasLimit", req.args.gasLimit, "newProposedBlockGasUsed", req.args.gasUsed, "newProposedBlockTxCount", len(req.args.txs), "mevRelay", req.args.mevRelay, "timestamp", time.Now().UTC().Format(timestampFormat))
 						w.bestProposedBlockLock.RUnlock()
 						continue
 					}
 				}
 			}
 			w.bestProposedBlockLock.RUnlock()
-			newProposedBlockWork, duration, err := w.simulateProposedBlock(req)
-			if err != nil {
-				log.Error("Processing and simulating proposedBlock failed", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "newProposedBlockReward", req.blockReward, "newProposedBlockGasUsed", req.gasUsed, "mevRelay", req.mevRelay, "newProposedBlockTxCount", len(req.txs), "simulatedDuration", duration, "timestamp", time.Now().UTC().Format(timestampFormat), "err", err)
-				continue
-			}
-
 			w.bestProposedBlockLock.Lock()
-			bestWorks, ok := w.bestProposedBlockInfo[req.blockNumber.Uint64()]
+			bestWorks, ok := w.bestProposedBlockInfo[blockNum]
 			if !ok || bestWorks == nil {
 				works := make(bestProposedWorks)
-				if newProposedBlockWork.work != nil {
-					works[req.prevBlockHash.String()] = newProposedBlockWork
+				if req.simulatedWork.work != nil {
+					works[prevBlockHash] = req.simulatedWork
 				}
-				w.bestProposedBlockInfo[req.blockNumber.Uint64()] = works
-				log.Info("Received proposedBlock, this is the first proposed block for this block number and previous block hash", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "newProposedBlockReward", newProposedBlockWork.reward, "newProposedBlockGasUsed", req.gasUsed, "mevRelay", req.mevRelay, "newProposedBlockTxCount", len(req.txs), "simulatedDuration", duration, "timestamp", time.Now().UTC().Format(timestampFormat))
+				w.bestProposedBlockInfo[blockNum] = works
+				log.Info("Received proposedBlock, this is the first proposed block for this block number and previous block hash", "blockNumber", req.args.blockNumber, "prevBlockHash", req.args.prevBlockHash.String(), "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockGasUsed", req.args.gasUsed, "mevRelay", req.args.mevRelay, "newProposedBlockTxCount", len(req.args.txs), "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
 
-			} else if previousProposedBlockWork, exist := bestWorks[req.prevBlockHash.String()]; exist && previousProposedBlockWork != nil && previousProposedBlockWork.work != nil {
-				if previousProposedBlockWork.reward != nil && newProposedBlockWork.reward.Cmp(previousProposedBlockWork.reward) > 0 {
-					log.Info("Received proposedBlock, replacing previously proposedBlock after simulation", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", newProposedBlockWork.reward, "newProposedBlockTxCount", len(newProposedBlockWork.work.txs), "mevRelay", req.mevRelay, "newProposedBlockGasUsed", req.gasUsed, "simulatedDuration", duration, "timestamp", time.Now().UTC().Format(timestampFormat))
+			} else if previousProposedBlockWork, exist := bestWorks[prevBlockHash]; exist && previousProposedBlockWork != nil && previousProposedBlockWork.work != nil {
+				if previousProposedBlockWork.reward != nil && req.simulatedWork.reward.Cmp(previousProposedBlockWork.reward) > 0 {
+					log.Info("Received proposedBlock, replacing previously proposedBlock after simulation", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockTxCount", len(req.simulatedWork.work.txs), "mevRelay", req.args.mevRelay, "newProposedBlockGasUsed", req.args.gasUsed, "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
 					// discard previously proposed block work before overwriting
 					previousProposedBlockWork.work.discard()
-					w.bestProposedBlockInfo[req.blockNumber.Uint64()][req.prevBlockHash.String()] = newProposedBlockWork
+					w.bestProposedBlockInfo[blockNum][prevBlockHash] = req.simulatedWork
 				} else {
-					log.Info("Received proposedBlock reward is not higher than previously proposed block", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", newProposedBlockWork.reward, "newProposedBlockTxCount", len(newProposedBlockWork.work.txs), "newProposedBlockGasUsed", req.gasUsed, "mevRelay", req.mevRelay, "simulatedDuration", duration, "timestamp", time.Now().UTC().Format(timestampFormat))
+					log.Info("Received proposedBlock reward is not higher than previously proposed block", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockTxCount", len(req.simulatedWork.work.txs), "newProposedBlockGasUsed", req.args.gasUsed, "mevRelay", req.args.mevRelay, "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
 				}
 			} else {
-				log.Info("Received proposedBlock, simulation and validation completed", "blockNumber", req.blockNumber, "prevBlockHash", req.prevBlockHash.String(), "newProposedBlockReward", newProposedBlockWork.reward, "newProposedBlockGasUsed", req.gasUsed, "mevRelay", req.mevRelay, "newProposedBlockTxCount", len(req.txs), "simulatedDuration", duration, "timestamp", time.Now().UTC().Format(timestampFormat))
+				log.Info("Received proposedBlock, simulation and validation completed", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockGasUsed", req.args.gasUsed, "mevRelay", req.args.mevRelay, "newProposedBlockTxCount", len(req.args.txs), "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
 			}
 			w.bestProposedBlockLock.Unlock()
 
@@ -1323,7 +1325,23 @@ func (w *worker) fillTransactionsProposedBlock(env *environment, block *Proposed
 
 // simulateProposedBlock generates a sealing block based on a proposed block.
 func (w *worker) simulateProposedBlock(proposedBlock *ProposedBlockArgs) (*bestProposedWork, time.Duration, error) {
-	start := time.Now()
+
+	var (
+		start  = time.Now()
+		reward = new(big.Int).Set(proposedBlock.blockReward)
+	)
+
+	w.bestProposedBlockLock.RLock()
+	defer w.bestProposedBlockLock.RUnlock()
+	if bestWorks, ok := w.bestProposedBlockInfo[proposedBlock.blockNumber.Uint64()]; ok && bestWorks != nil {
+		previousProposedBlockWork, exist := bestWorks[proposedBlock.prevBlockHash.String()]
+		if exist && previousProposedBlockWork != nil && previousProposedBlockWork.reward != nil {
+			if previousProposedBlockWork.reward.Cmp(reward) > 0 {
+				log.Debug("Skipping proposedBlock", "blockNumber", proposedBlock.blockNumber, "prevBlockHash", proposedBlock.prevBlockHash.String(), "newProposedBlockReward", reward, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockGasLimit", proposedBlock.gasLimit, "newProposedBlockGasUsed", proposedBlock.gasUsed, "newProposedBlockTxCount", len(proposedBlock.txs), "mevRelay", proposedBlock.mevRelay, "timestamp", time.Now().UTC().Format(timestampFormat))
+				return nil, 0, nil
+			}
+		}
+	}
 
 	// Set the coinbase if the worker is running or it's required
 	var coinbase common.Address
