@@ -799,6 +799,7 @@ func (w *worker) proposedLoop() {
 			w.bestProposedBlockLock.RUnlock()
 			w.bestProposedBlockLock.Lock()
 			bestWorks, ok := w.bestProposedBlockInfo[blockNum]
+			worksToDiscard := make([]*environment, 0)
 			if !ok || bestWorks == nil {
 				works := make(bestProposedWorks)
 				if req.simulatedWork.work != nil {
@@ -811,7 +812,7 @@ func (w *worker) proposedLoop() {
 				if previousProposedBlockWork.reward != nil && req.simulatedWork.reward.Cmp(previousProposedBlockWork.reward) > 0 {
 					log.Info("Received proposedBlock, replacing previously proposedBlock after simulation", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockTxCount", len(req.simulatedWork.work.txs), "mevRelay", req.args.mevRelay, "newProposedBlockGasUsed", req.args.gasUsed, "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
 					// discard previously proposed block work before overwriting
-					previousProposedBlockWork.work.discard()
+					worksToDiscard = append(worksToDiscard, previousProposedBlockWork.work)
 					w.bestProposedBlockInfo[blockNum][prevBlockHash] = req.simulatedWork
 				} else {
 					log.Info("Received proposedBlock reward is not higher than previously proposed block", "blockNumber", blockNum, "prevBlockHash", prevBlockHash, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockReward", req.simulatedWork.reward, "newProposedBlockTxCount", len(req.simulatedWork.work.txs), "newProposedBlockGasUsed", req.args.gasUsed, "mevRelay", req.args.mevRelay, "simulatedDuration", req.simDuration, "timestamp", time.Now().UTC().Format(timestampFormat))
@@ -821,16 +822,24 @@ func (w *worker) proposedLoop() {
 			}
 			w.bestProposedBlockLock.Unlock()
 
+			for _, works := range worksToDiscard {
+				works.discard()
+			}
+
 		case <-chainBlockCh:
 			// each block will have its own interruptCh to stop work with a reason
+			worksToDiscard := make([]bestProposedWorks, 0)
 			w.bestProposedBlockLock.Lock()
 			for blockNumber, works := range w.bestProposedBlockInfo {
 				if blockNumber <= w.chain.CurrentBlock().NumberU64() {
-					works.discard()
+					worksToDiscard = append(worksToDiscard, works)
 					delete(w.bestProposedBlockInfo, blockNumber)
 				}
 			}
 			w.bestProposedBlockLock.Unlock()
+			for _, works := range worksToDiscard {
+				works.discard()
+			}
 
 		// System stopped
 		case <-w.exitCh:
@@ -1332,16 +1341,17 @@ func (w *worker) simulateProposedBlock(proposedBlock *ProposedBlockArgs) (*bestP
 	)
 
 	w.bestProposedBlockLock.RLock()
-	defer w.bestProposedBlockLock.RUnlock()
 	if bestWorks, ok := w.bestProposedBlockInfo[proposedBlock.blockNumber.Uint64()]; ok && bestWorks != nil {
 		previousProposedBlockWork, exist := bestWorks[proposedBlock.prevBlockHash.String()]
 		if exist && previousProposedBlockWork != nil && previousProposedBlockWork.reward != nil {
 			if previousProposedBlockWork.reward.Cmp(reward) > 0 {
 				log.Debug("Skipping proposedBlock", "blockNumber", proposedBlock.blockNumber, "prevBlockHash", proposedBlock.prevBlockHash.String(), "newProposedBlockReward", reward, "previousProposedBlockReward", previousProposedBlockWork.reward, "newProposedBlockGasLimit", proposedBlock.gasLimit, "newProposedBlockGasUsed", proposedBlock.gasUsed, "newProposedBlockTxCount", len(proposedBlock.txs), "mevRelay", proposedBlock.mevRelay, "timestamp", time.Now().UTC().Format(timestampFormat))
+				w.bestProposedBlockLock.RUnlock()
 				return nil, 0, nil
 			}
 		}
 	}
+	w.bestProposedBlockLock.RUnlock()
 
 	// Set the coinbase if the worker is running or it's required
 	var coinbase common.Address

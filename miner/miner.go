@@ -18,6 +18,8 @@
 package miner
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"math/big"
 	"sync"
@@ -33,10 +35,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/event"
+	pb "github.com/ethereum/go-ethereum/grpc/protobuf"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -47,16 +52,31 @@ type Backend interface {
 }
 
 type ClientMap map[string]*rpc.Client
+type ClientGrpcMap map[string]pb.ProposerClient
 
 type ClientMapping struct {
-	mx        *sync.RWMutex
-	clientMap ClientMap
+	mx            *sync.RWMutex
+	clientMap     ClientMap
+	clientGrpcMap ClientGrpcMap
 }
 
-func NewClientMap(relays []string) *ClientMapping {
+func NewClientMap(relays, relaysGRPC []string) *ClientMapping {
 	c := &ClientMapping{
-		mx:        new(sync.RWMutex),
-		clientMap: make(ClientMap),
+		mx:            new(sync.RWMutex),
+		clientMap:     make(ClientMap),
+		clientGrpcMap: make(ClientGrpcMap),
+	}
+
+	for _, endpoint := range relaysGRPC {
+		tlsCfg := &tls.Config{InsecureSkipVerify: true}
+		tlsCred := credentials.NewTLS(tlsCfg)
+		conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(tlsCred))
+		if err != nil {
+			log.Warn("Failed to dial MEV GRPC relay", "dest", endpoint, "err", err)
+			continue
+		}
+
+		c.clientGrpcMap[endpoint] = pb.NewProposerClient(conn)
 	}
 
 	for _, relay := range relays {
@@ -125,6 +145,62 @@ func (c *ClientMapping) Remove(relay string) error {
 	return nil
 }
 
+func (c *ClientMapping) MappingGRPC() ClientGrpcMap {
+	clientGrpcMap := make(ClientGrpcMap, len(c.clientGrpcMap))
+
+	c.mx.RLock()
+	for k, v := range c.clientGrpcMap {
+		clientGrpcMap[k] = v
+	}
+	c.mx.RUnlock()
+
+	return clientGrpcMap
+}
+
+func (c *ClientMapping) LenGRPC() int {
+	c.mx.RLock()
+	defer c.mx.RUnlock()
+	return len(c.clientGrpcMap)
+}
+
+func (c *ClientMapping) AddGrpc(relay string) (pb.ProposerClient, error) {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	tlsCfg := &tls.Config{InsecureSkipVerify: true}
+	tlsCred := credentials.NewTLS(tlsCfg)
+	conn, err := grpc.Dial(relay, grpc.WithTransportCredentials(tlsCred))
+	if err != nil {
+		log.Warn("Failed to dial MEV GRPC relay", "dest", relay, "err", err)
+		return nil, err
+	}
+	client := pb.NewProposerClient(conn)
+	c.clientGrpcMap[relay] = pb.NewProposerClient(conn)
+
+	return client, nil
+}
+
+func (c *ClientMapping) GetGRPC(relay string) (pb.ProposerClient, bool) {
+	c.mx.RLock()
+	client, ok := c.clientGrpcMap[relay]
+	c.mx.RUnlock()
+
+	return client, ok
+}
+
+func (c *ClientMapping) RemoveGrpc(relay string) error {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	if _, ok := c.clientGrpcMap[relay]; !ok {
+		return fmt.Errorf("relay grpc %s not found", relay)
+	}
+
+	delete(c.clientGrpcMap, relay)
+
+	return nil
+}
+
 // Config is the configuration parameters of mining.
 type Config struct {
 	Etherbase     common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
@@ -141,6 +217,8 @@ type Config struct {
 
 	MEVRelays                   []string `toml:",omitempty"` // RPC clients to register validator each epoch
 	ProposedBlockUri            string   `toml:",omitempty"` // received proposedBlocks on that uri
+	MevRelaysGRPC               []string `toml:",omitempty"` // gRPC clients to register validator each epoch
+	ProposedBlockGrpcUri        string   `toml:",omitempty"` // received proposedBlocks on that grpc uri
 	ProposedBlockNamespace      string   `toml:",omitempty"` // define the namespace of proposedBlock
 	RegisterValidatorSignedHash []byte   `toml:"-"`          // signed value of crypto.Keccak256([]byte(ProposedBlockUri))
 }
@@ -160,6 +238,7 @@ type Miner struct {
 
 	mevRelays              *ClientMapping
 	proposedBlockUri       string
+	proposedBlockGrpcUri   string
 	proposedBlockNamespace string
 	signedProposedBlockUri []byte
 }
@@ -174,8 +253,9 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		stopCh:  make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, false),
 
-		mevRelays:              NewClientMap(config.MEVRelays),
+		mevRelays:              NewClientMap(config.MEVRelays, config.MevRelaysGRPC),
 		proposedBlockUri:       config.ProposedBlockUri,
+		proposedBlockGrpcUri:   config.ProposedBlockGrpcUri,
 		proposedBlockNamespace: config.ProposedBlockNamespace,
 		signedProposedBlockUri: config.RegisterValidatorSignedHash,
 	}
@@ -422,7 +502,13 @@ func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlo
 }
 
 func (miner *Miner) registerValidator() {
-	log.Info("register validator to MEV relays")
+
+	if miner.proposedBlockGrpcUri != "" && miner.mevRelays.LenGRPC() != 0 {
+		miner.registerValidatorViaGRPC()
+		return // do not proceed if grpc enabled
+	}
+
+	log.Info("register validator via RPC to MEV relays")
 	registerValidatorArgs := &ethapi.RegisterValidatorArgs{
 		Data:       []byte(miner.proposedBlockUri),
 		Signature:  miner.signedProposedBlockUri,
@@ -441,6 +527,26 @@ func (miner *Miner) registerValidator() {
 			}
 
 			log.Debug("register validator to MEV relay", "dest", dest, "result", result)
+		}(dest, destClient, registerValidatorArgs)
+	}
+}
+
+func (miner *Miner) registerValidatorViaGRPC() {
+	log.Info("register validator via gRPC to MEV relays")
+	registerValidatorArgs := &pb.RegisterValidatorRequest{
+		Data:       []byte(miner.proposedBlockGrpcUri),
+		Signature:  miner.signedProposedBlockUri,
+		Namespace:  miner.proposedBlockNamespace,
+		CommitHash: version.CommitHash(),
+	}
+	for dest, destClient := range miner.mevRelays.MappingGRPC() {
+		go func(dest string, destClient pb.ProposerClient, request *pb.RegisterValidatorRequest) {
+
+			_, err := destClient.RegisterValidator(context.Background(), request)
+			if err != nil {
+				log.Warn("Failed to register validator to MEV relay", "dest", dest, "err", err)
+				return
+			}
 		}(dest, destClient, registerValidatorArgs)
 	}
 }

@@ -34,6 +34,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/ethereum/go-ethereum/grpc"
 	"github.com/fatih/structs"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
@@ -547,7 +548,7 @@ var (
 	}
 	MinerMEVRelaysFlag = cli.StringSliceFlag{
 		Name:  "miner.mevrelays",
-		Usage: "Destinations to register the validator each epoch. The miner will accept proposed blocks from these urls, if they are profitable.",
+		Usage: "RPC Destinations to register the validator each epoch. The miner will accept proposed blocks from these urls, if they are profitable.",
 	}
 	MinerMEVProposedBlockUriFlag = cli.StringFlag{
 		Name:  "miner.mevproposedblockuri",
@@ -557,6 +558,16 @@ var (
 		Name:  "miner.mevproposedblocknamespace",
 		Usage: "The namespace implements the proposedBlock function (default = eth). ",
 		Value: "eth",
+	}
+
+	MinerMEVRelaysGrpcFlag = cli.StringSliceFlag{
+		Name:  "miner.mevrelaysgrpc",
+		Usage: "GRPC Destinations to register the validator each epoch. The miner will accept proposed blocks from these urls, if they are profitable.",
+	}
+
+	MinerMEVProposedBlockGrpcUriFlag = cli.StringFlag{
+		Name:  "miner.mevproposedblockgrpcuri",
+		Usage: "The grpc uri MEV relays should send the proposedBlock to.",
 	}
 	// Account settings
 	UnlockedAccountFlag = cli.StringFlag{
@@ -1631,6 +1642,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerMEVRelaysFlag.Name) {
 		cfg.MEVRelays = ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name)
 	}
+	if ctx.GlobalIsSet(MinerMEVRelaysGrpcFlag.Name) {
+		cfg.MevRelaysGRPC = ctx.GlobalStringSlice(MinerMEVRelaysGrpcFlag.Name)
+	}
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1664,6 +1678,10 @@ func setMEV(ctx *cli.Context, ks *keystore.KeyStore, cfg *miner.Config) {
 
 		if cfg.ProposedBlockNamespace == "" && ctx.GlobalIsSet(MinerMEVProposedBlockNamespaceFlag.Name) {
 			cfg.ProposedBlockNamespace = ctx.GlobalString(MinerMEVProposedBlockNamespaceFlag.Name)
+		}
+
+		if ctx.GlobalIsSet(MinerMEVProposedBlockGrpcUriFlag.Name) {
+			cfg.ProposedBlockUri = ctx.GlobalString(MinerMEVProposedBlockGrpcUriFlag.Name)
 		}
 
 		account, err := ks.Find(accounts.Account{Address: cfg.Etherbase})
@@ -2032,6 +2050,13 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) (ethapi.Backend
 		if err != nil {
 			Fatalf("Failed to register the Ethereum service: %v", err)
 		}
+
+		if cfg.Miner.ProposedBlockGrpcUri != "" {
+			//setup grpc server
+			proposer := grpc.NewProposer(backend.ApiBackend)
+			stack.RegisterAPI(grpc.NewAPI(proposer, cfg.Miner.ProposedBlockGrpcUri, "", ""))
+		}
+
 		stack.RegisterAPIs(tracers.APIs(backend.ApiBackend))
 		if backend.BlockChain().Config().TerminalTotalDifficulty != nil {
 			if err := lescatalyst.Register(stack, backend); err != nil {
@@ -2054,6 +2079,12 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) (ethapi.Backend
 		if err := ethcatalyst.Register(stack, backend); err != nil {
 			Fatalf("Failed to register the catalyst service: %v", err)
 		}
+	}
+
+	if cfg.Miner.ProposedBlockGrpcUri != "" {
+		//setup grpc server
+		proposer := grpc.NewProposer(backend.APIBackend)
+		stack.RegisterAPI(grpc.NewAPI(proposer, cfg.Miner.ProposedBlockGrpcUri, "", ""))
 	}
 	stack.RegisterAPIs(tracers.APIs(backend.APIBackend))
 	return backend.APIBackend, backend

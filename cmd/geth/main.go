@@ -148,6 +148,8 @@ var (
 		utils.MinerMEVRelaysFlag,
 		utils.MinerMEVProposedBlockUriFlag,
 		utils.MinerMEVProposedBlockNamespaceFlag,
+		utils.MinerMEVRelaysGrpcFlag,
+		utils.MinerMEVProposedBlockGrpcUriFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,
@@ -329,7 +331,6 @@ func geth(ctx *cli.Context) error {
 	prepare(ctx)
 	stack, backend := makeFullNode(ctx)
 	defer stack.Close()
-
 	startNode(ctx, stack, backend, false)
 	stack.Wait()
 	return nil
