@@ -135,10 +135,6 @@ var (
 		Name:  "enabletrustprotocol",
 		Usage: "Enable trust protocol",
 	}
-	DisableBscProtocolFlag = cli.BoolFlag{
-		Name:  "disablebscprotocol",
-		Usage: "Disable bsc protocol",
-	}
 
 	DiffSyncFlag = cli.BoolFlag{
 		Name:  "diffsync",
@@ -947,6 +943,11 @@ var (
 		Usage: "Enable voting when mining",
 	}
 
+	DisableVoteAttestationFlag = cli.BoolFlag{
+		Name:  "disablevoteattestation",
+		Usage: "Disable assembling vote attestation ",
+	}
+
 	EnableMaliciousVoteMonitorFlag = cli.BoolFlag{
 		Name:  "monitor.maliciousvote",
 		Usage: "Enable malicious vote monitor to check whether any validator violates the voting rules of fast finality",
@@ -1638,6 +1639,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalBool(VotingEnabledFlag.Name) {
 		cfg.VoteEnable = true
 	}
+	if ctx.GlobalBool(DisableVoteAttestationFlag.Name) {
+		cfg.DisableVoteAttestation = true
+	}
 
 	if ctx.GlobalIsSet(MinerMEVRelaysFlag.Name) {
 		cfg.MEVRelays = ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name)
@@ -1866,9 +1870,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.GlobalIsSet(EnableTrustProtocolFlag.Name) {
 		cfg.EnableTrustProtocol = ctx.GlobalIsSet(EnableTrustProtocolFlag.Name)
-	}
-	if ctx.GlobalIsSet(DisableBscProtocolFlag.Name) {
-		cfg.DisableBscProtocol = ctx.GlobalIsSet(DisableBscProtocolFlag.Name)
 	}
 	if ctx.GlobalIsSet(DiffSyncFlag.Name) {
 		log.Warn("The --diffsync flag is deprecated and will be removed in the future!")
