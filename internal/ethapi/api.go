@@ -1397,6 +1397,7 @@ type RegisterValidatorArgs struct {
 	Signature  hexutil.Bytes `json:"signature"`
 	Namespace  string        `json:"namespace"`
 	CommitHash string        `json:"commitHash"`
+	GasCeil    uint64        `json:"gasCeil"`
 }
 
 func (s *PublicEthereumAPI) RegisterValidator(ctx context.Context, args RegisterValidatorArgs) error {
@@ -1404,13 +1405,14 @@ func (s *PublicEthereumAPI) RegisterValidator(ctx context.Context, args Register
 }
 
 type ProposedBlockArgs struct {
-	MEVRelay      string          `json:"mevRelay,omitempty"`
-	BlockNumber   rpc.BlockNumber `json:"blockNumber"`
-	PrevBlockHash common.Hash     `json:"prevBlockHash"`
-	BlockReward   *big.Int        `json:"blockReward"`
-	GasLimit      uint64          `json:"gasLimit"`
-	GasUsed       uint64          `json:"gasUsed"`
-	Payload       []hexutil.Bytes `json:"payload"`
+	MEVRelay         string          `json:"mevRelay,omitempty"`
+	BlockNumber      rpc.BlockNumber `json:"blockNumber"`
+	PrevBlockHash    common.Hash     `json:"prevBlockHash"`
+	BlockReward      *big.Int        `json:"blockReward"`
+	GasLimit         uint64          `json:"gasLimit"`
+	GasUsed          uint64          `json:"gasUsed"`
+	Payload          []hexutil.Bytes `json:"payload"`
+	UnRevertedHashes []common.Hash   `json:"unRevertedHashes,omitempty"`
 }
 
 type ProposedBlockResponse struct {
@@ -1451,7 +1453,12 @@ func proposedBlock(ctx context.Context, args ProposedBlockArgs, currentBlock *ty
 		txs = append(txs, tx)
 	}
 
-	simDuration, err := b.ProposedBlock(ctx, args.MEVRelay, proposedBlockNumber, args.PrevBlockHash, args.BlockReward, args.GasLimit, args.GasUsed, txs)
+	unRevertedHashes := make(map[common.Hash]struct{}, len(args.UnRevertedHashes))
+	for _, hash := range args.UnRevertedHashes {
+		unRevertedHashes[hash] = struct{}{}
+	}
+
+	simDuration, err := b.ProposedBlock(ctx, args.MEVRelay, proposedBlockNumber, args.PrevBlockHash, args.BlockReward, args.GasLimit, args.GasUsed, txs, unRevertedHashes)
 	if err != nil {
 		return nil, err
 	}

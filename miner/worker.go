@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -192,6 +193,7 @@ type ProposedBlockArgs struct {
 	gasLimit      uint64
 	gasUsed       uint64
 	txs           types.Transactions
+	unReverted    map[common.Hash]struct{}
 }
 
 // ProposedBlock defines the argument of a proposed block and simulated work
@@ -269,6 +271,7 @@ type worker struct {
 	// Value (v): A nested map representing the mapping between (k - prevBlockHash) and the corresponding proposed work(v - environment,reward)
 	bestProposedBlockInfo map[uint64]bestProposedWorks
 	currentGasLimit       *uint64
+	prevBlockGasLimit     *uint64
 }
 type bestProposedWorks map[string]*bestProposedWork
 
@@ -321,6 +324,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh:    make(chan time.Duration),
 		recentMinedBlocks:     recentMinedBlocks,
 		currentGasLimit:       new(uint64),
+		prevBlockGasLimit:     new(uint64),
 		bestProposedBlockInfo: make(map[uint64]bestProposedWorks),
 	}
 	// Subscribe events for blockchain
@@ -826,8 +830,9 @@ func (w *worker) proposedLoop() {
 				works.discard()
 			}
 
-		case <-chainBlockCh:
+		case block := <-chainBlockCh:
 			// each block will have its own interruptCh to stop work with a reason
+			atomic.StoreUint64(w.prevBlockGasLimit, block.Block.GasLimit())
 			worksToDiscard := make([]bestProposedWorks, 0)
 			w.bestProposedBlockLock.Lock()
 			for blockNumber, works := range w.bestProposedBlockInfo {
@@ -1214,7 +1219,7 @@ func (w *worker) generateWork(params *generateParams) (*types.Block, error) {
 	w.fillTransactions(nil, work, nil)
 
 	bestWork := work.copy()
-	defer bestWork.discard()
+	defer func() { bestWork.discard() }() // wrapping with a function since we reassign bestWork later
 	bestWork = w.getBestWorkBetweenInternalAndProposedBlock(bestWork, callerTypeGenerateWork)
 	block, _, err := w.engine.FinalizeAndAssemble(w.chain, bestWork.header, bestWork.state, bestWork.txs, bestWork.unclelist(), bestWork.receipts)
 	return block, err
@@ -1262,7 +1267,7 @@ func (w *worker) getBestWorkBetweenInternalAndProposedBlock(internalWork *enviro
 // fillTransactionsProposedBlock retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (w *worker) fillTransactionsProposedBlock(env *environment, block *ProposedBlockArgs) (error, *big.Int) {
+func (w *worker) fillTransactionsProposedBlock(ctx context.Context, env *environment, block *ProposedBlockArgs) (error, *big.Int) {
 	gasLimit := env.header.GasLimit
 	blockReward := big.NewInt(0)
 	if env.gasPool == nil {
@@ -1280,7 +1285,15 @@ func (w *worker) fillTransactionsProposedBlock(env *environment, block *Proposed
 	bloomProcessors := core.NewAsyncReceiptBloomGenerator(processorCapacity)
 
 	signal := commitInterruptNone
-	for _, tx := range block.txs {
+	for i, tx := range block.txs {
+		select {
+		default:
+		case <-ctx.Done():
+			err := ctx.Err()
+			log.Trace("Filling of transaction stopped", "canceledAt", fmt.Sprintf("%d/%d", i, len(block.txs)), "err", err)
+			return err, nil
+		}
+
 		// If we don't have enough gas for any further transactions then we're done
 		if env.gasPool.Gas() < params.TxGas {
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
@@ -1298,6 +1311,13 @@ func (w *worker) fillTransactionsProposedBlock(env *environment, block *Proposed
 		if err != nil {
 			log.Error("Failed to commit transaction on proposedBlock", "blockNumber", block.blockNumber.String(), "fromMevRelay", block.mevRelay, "proposedTxs", len(block.txs), "failedTx", tx.Hash().String())
 			return err, nil
+		}
+
+		if env.receipts[len(env.receipts)-1].Status == types.ReceiptStatusFailed {
+			if _, ok := block.unReverted[tx.Hash()]; ok {
+				log.Warn("bundle reverted proposedBlock", "blockNumber", block.blockNumber, "from MEVRelay", block.mevRelay, "reverted tx", tx.Hash().Hex())
+				return errors.New("bundle reverted"), nil
+			}
 		}
 	}
 
@@ -1333,7 +1353,7 @@ func (w *worker) fillTransactionsProposedBlock(env *environment, block *Proposed
 }
 
 // simulateProposedBlock generates a sealing block based on a proposed block.
-func (w *worker) simulateProposedBlock(proposedBlock *ProposedBlockArgs) (*bestProposedWork, time.Duration, error) {
+func (w *worker) simulateProposedBlock(ctx context.Context, proposedBlock *ProposedBlockArgs) (*bestProposedWork, time.Duration, error) {
 
 	var (
 		start  = time.Now()
@@ -1371,8 +1391,14 @@ func (w *worker) simulateProposedBlock(proposedBlock *ProposedBlockArgs) (*bestP
 	}
 	defer work.discard()
 
+	select {
+	default:
+	case <-ctx.Done():
+		return nil, time.Since(start), ctx.Err()
+	}
+
 	// Fill transactions from the proposed block
-	err, blockReward := w.fillTransactionsProposedBlock(work, proposedBlock)
+	err, blockReward := w.fillTransactionsProposedBlock(ctx, work, proposedBlock)
 	if err != nil {
 		return nil, time.Since(start), err
 	}

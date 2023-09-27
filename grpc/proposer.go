@@ -61,7 +61,9 @@ func (p *Proposer) ProposeBlock(ctx context.Context, in *pb.ProposeBlockRequest)
 		txs = append(txs, tx)
 	}
 
-	simDuration, err := p.backend.ProposedBlock(ctx, in.MevRelay, new(big.Int).SetUint64(in.GetBlockNumber()), common.HexToHash(in.GetPrevBlockHash()), new(big.Int).SetUint64(in.GetBlockReward()), in.GetGasLimit(), in.GetGasUsed(), txs)
+	var unRevertedHashes = make(map[common.Hash]struct{})
+
+	simDuration, err := p.backend.ProposedBlock(ctx, in.MevRelay, new(big.Int).SetUint64(in.GetBlockNumber()), common.HexToHash(in.GetPrevBlockHash()), new(big.Int).SetUint64(in.GetBlockReward()), in.GetGasLimit(), in.GetGasUsed(), txs, unRevertedHashes)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

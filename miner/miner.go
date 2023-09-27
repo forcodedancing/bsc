@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -450,42 +451,69 @@ func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscript
 }
 
 // ProposedBlock add the block to the list of works
-func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) (simDuration time.Duration, err error) {
+func (miner *Miner) ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions, unReverted map[common.Hash]struct{}) (simDuration time.Duration, err error) {
 	var (
 		isBlockSkipped bool
 		simWork        *bestProposedWork
 	)
+
+	endOfProposingWindow := time.Unix(int64(miner.eth.BlockChain().CurrentBlock().Time()+miner.worker.chainConfig.Parlia.Period), 0).Add(-miner.worker.config.DelayLeftOver)
+
+	timeout := time.Until(endOfProposingWindow)
+	if timeout <= 0 {
+		err = fmt.Errorf("proposed block is too late, end of proposing window %s, appeared %s later", endOfProposingWindow, common.PrettyDuration(timeout))
+		return
+	}
+
+	proposingCtx, proposingCancel := context.WithTimeout(ctx, timeout)
+	defer proposingCancel()
+
 	currentGasLimit := atomic.LoadUint64(miner.worker.currentGasLimit)
+	previousBlockGasLimit := atomic.LoadUint64(miner.worker.prevBlockGasLimit)
 	defer func() {
-		log.Debug("Received proposedBlock",
+		logCtx := []any{
 			"blockNumber", blockNumber,
-			"mevRelay", MEVRelay,
+			"mevRelay", mevRelay,
 			"prevBlockHash", prevBlockHash.Hex(),
 			"proposedReward", reward,
 			"gasLimit", gasLimit,
 			"gasUsed", gasUsed,
 			"txCount", len(txs),
+			"unRevertedCount", len(unReverted),
 			"isBlockSkipped", isBlockSkipped,
 			"currentGasLimit", currentGasLimit,
 			"timestamp", time.Now().UTC().Format(timestampFormat),
 			"simDuration", simDuration,
-		)
+		}
+
+		if err != nil {
+			logCtx = append(logCtx, "err", err)
+		}
+
+		log.Debug("Received proposedBlock", logCtx...)
 	}()
 	isBlockSkipped = gasUsed > currentGasLimit
 	if isBlockSkipped {
 		err = fmt.Errorf("proposed block gasUsed %v exceeds the current block gas limit %v", gasUsed, currentGasLimit)
 		return
 	}
+	desiredGasLimit := core.CalcGasLimit(previousBlockGasLimit, miner.worker.config.GasCeil)
+	if desiredGasLimit != gasLimit {
+		log.Warn("proposedBlock has wrong gasLimit", "MEVRelay", mevRelay, "blockNumber", blockNumber, "validatorGasLimit", desiredGasLimit, "proposedBlockGasLimit", gasLimit)
+		err = fmt.Errorf("proposed block gasLimit %v is different than the validator gasLimit %v", gasLimit, desiredGasLimit)
+		return
+	}
 	args := &ProposedBlockArgs{
-		mevRelay:      MEVRelay,
+		mevRelay:      mevRelay,
 		blockNumber:   blockNumber,
 		prevBlockHash: prevBlockHash,
 		blockReward:   reward,
 		gasLimit:      gasLimit,
 		gasUsed:       gasUsed,
 		txs:           txs,
+		unReverted:    unReverted,
 	}
-	simWork, simDuration, err = miner.worker.simulateProposedBlock(args)
+	simWork, simDuration, err = miner.worker.simulateProposedBlock(proposingCtx, args)
 	if err != nil {
 		err = fmt.Errorf("processing and simulating proposedBlock failed, %v", err)
 		return
@@ -494,12 +522,14 @@ func (miner *Miner) ProposedBlock(MEVRelay string, blockNumber *big.Int, prevBlo
 		//  do not return error, when the block is skipped
 		return
 	}
-	miner.worker.proposedCh <- &ProposedBlock{
-		args:          args,
-		simulatedWork: simWork,
-		simDuration:   simDuration,
+
+	select {
+	case <-proposingCtx.Done():
+		err = errors.WithMessage(proposingCtx.Err(), "failed to propose block due to context timeout")
+		return
+	case miner.worker.proposedCh <- &ProposedBlock{args: args, simulatedWork: simWork, simDuration: simDuration}:
+		return
 	}
-	return
 }
 
 func (miner *Miner) registerValidator() {
@@ -515,6 +545,7 @@ func (miner *Miner) registerValidator() {
 		Signature:  miner.signedProposedBlockUri,
 		Namespace:  miner.proposedBlockNamespace,
 		CommitHash: version.CommitHash(),
+		GasCeil:    miner.worker.config.GasCeil,
 	}
 	for dest, destClient := range miner.mevRelays.Mapping() {
 		go func(dest string, destinationClient *rpc.Client, registerValidatorArgs *ethapi.RegisterValidatorArgs) {
@@ -564,6 +595,7 @@ func (miner *Miner) AddRelay(relay string) error {
 		Signature:  miner.signedProposedBlockUri,
 		Namespace:  miner.proposedBlockNamespace,
 		CommitHash: version.CommitHash(),
+		GasCeil:    miner.worker.config.GasCeil,
 	}
 
 	var result any

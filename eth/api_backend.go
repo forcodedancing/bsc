@@ -409,13 +409,13 @@ func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(block, txIndex, reexec)
 }
 
-func (b *EthAPIBackend) ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions) (simDuration time.Duration, err error) {
+func (b *EthAPIBackend) ProposedBlock(ctx context.Context, mevRelay string, blockNumber *big.Int, prevBlockHash common.Hash, reward *big.Int, gasLimit uint64, gasUsed uint64, txs types.Transactions, unRevertedHashes map[common.Hash]struct{}) (simDuration time.Duration, err error) {
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
 		return
 	default:
-		return b.eth.miner.ProposedBlock(mevRelay, blockNumber, prevBlockHash, reward, gasLimit, gasUsed, txs)
+		return b.eth.miner.ProposedBlock(ctx, mevRelay, blockNumber, prevBlockHash, reward, gasLimit, gasUsed, txs, unRevertedHashes)
 	}
 }
 
