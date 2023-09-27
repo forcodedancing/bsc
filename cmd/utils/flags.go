@@ -1642,7 +1642,6 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalBool(DisableVoteAttestationFlag.Name) {
 		cfg.DisableVoteAttestation = true
 	}
-
 	if ctx.GlobalIsSet(MinerMEVRelaysFlag.Name) {
 		cfg.MEVRelays = ctx.GlobalStringSlice(MinerMEVRelaysFlag.Name)
 	}
