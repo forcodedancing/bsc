@@ -27,7 +27,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/grpc"
 	"github.com/prometheus/tsdb/fileutil"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -57,7 +56,6 @@ type Node struct {
 	lock          sync.Mutex
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
-	grpcAPI       *grpc.API
 	http          *httpServer //
 	httpSecuredIP *httpServer
 	ws            *httpServer //
@@ -300,14 +298,6 @@ func (n *Node) doClose(errs []error) error {
 
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
-	//start grpc server
-	if n.grpcAPI != nil {
-		go func() {
-			n.log.Info("Starting grpc server", "instance", n.server.Name)
-			n.grpcAPI.Start()
-		}()
-	}
-
 	// start networking endpoints
 	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
 	if err := n.server.Start(); err != nil {
@@ -335,9 +325,6 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 // stopServices terminates running services, RPC and p2p networking.
 // It is the inverse of Start.
 func (n *Node) stopServices(running []Lifecycle) error {
-	if n.grpcAPI != nil {
-		n.grpcAPI.Stop()
-	}
 	n.stopRPC()
 
 	// Stop running lifecycles in reverse order.
@@ -527,17 +514,6 @@ func (n *Node) RegisterAPIs(apis []rpc.API) {
 		panic("can't register APIs on running/stopped node")
 	}
 	n.rpcAPIs = append(n.rpcAPIs, apis...)
-}
-
-// RegisterAPI registers the GRPC API a service provides on the node.
-func (n *Node) RegisterAPI(api *grpc.API) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state != initializingState {
-		panic("can't register APIs on running/stopped node")
-	}
-	n.grpcAPI = api
 }
 
 // RegisterHandler mounts a handler on the given path on the canonical HTTP server.

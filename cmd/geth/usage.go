@@ -204,8 +204,6 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.MinerMEVRelaysFlag,
 			utils.MinerMEVProposedBlockUriFlag,
 			utils.MinerMEVProposedBlockNamespaceFlag,
-			utils.MinerMEVRelaysGrpcFlag,
-			utils.MinerMEVProposedBlockGrpcUriFlag,
 			utils.MinerNoVerfiyFlag,
 			utils.VotingEnabledFlag,
 			utils.DisableVoteAttestationFlag,
