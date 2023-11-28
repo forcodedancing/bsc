@@ -408,3 +408,16 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (core.Message, vm.BlockContext, *state.StateDB, error) {
 	return b.eth.stateAtTransaction(block, txIndex, reexec)
 }
+
+func (b *EthAPIBackend) BuilderEnabled() bool {
+	return b.eth.miner.BuilderEnabled()
+}
+
+func (b *EthAPIBackend) Bid(ctx context.Context, builderAddr common.Address, block int64, txs types.Transactions, gasValue, builderFeeValue, gasLimit int64) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.eth.miner.ReceiveBid(ctx, builderAddr, block, txs, gasValue, builderFeeValue, gasLimit)
+	}
+}

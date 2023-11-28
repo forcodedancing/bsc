@@ -345,3 +345,11 @@ func (b *LesApiBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 func (b *LesApiBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (core.Message, vm.BlockContext, *state.StateDB, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
+
+func (b *LesApiBackend) BuilderEnabled() bool {
+	return false
+}
+
+func (b *LesApiBackend) Bid(ctx context.Context, builderAddr common.Address, block int64, txs types.Transactions, gasValue, builderFeeValue, gasLimit int64) error {
+	return nil
+}

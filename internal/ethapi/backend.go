@@ -96,6 +96,12 @@ type Backend interface {
 	SubscribeNewVoteEvent(chan<- core.NewVoteEvent) event.Subscription
 	SubscribeFinalizedHeaderEvent(ch chan<- core.FinalizedHeaderEvent) event.Subscription
 
+	// Builder API
+	BuilderEnabled() bool
+	Bid(ctx context.Context, builderAddr common.Address, block int64, txs types.Transactions, gasValue, builderFeeValue, gasLimit int64) error
+	//Txs(ctx context.Context, args TxsArgs) (*TxsRes, error)
+	//Issue(ctx context.Context, args IssueArgs) error
+
 	ChainConfig() *params.ChainConfig
 	Engine() consensus.Engine
 }
@@ -141,6 +147,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Namespace: "personal",
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
+			Public:    false,
+		}, {
+			Namespace: "builder",
+			Version:   "1.0",
+			Service:   NewPublicBuilderAPI(apiBackend),
 			Public:    false,
 		},
 	}

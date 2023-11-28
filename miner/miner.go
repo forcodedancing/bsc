@@ -18,6 +18,7 @@
 package miner
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
@@ -56,6 +57,16 @@ type Config struct {
 	Noverify               bool           // Disable remote mining solution verification(only useful in ethash).
 	VoteEnable             bool           // Whether to vote when mining
 	DisableVoteAttestation bool           // Whether to skip assembling vote attestation
+
+	BuilderEnabled             bool          `toml:",omitempty"` // Whether to enable builders for proposing blocks or not
+	BuilderInfos               []string      `toml:",omitempty"` // Information of builders, format address|url,address|url
+	ProxyEnabled               bool          `toml:",omitempty"` // Whether to enable a proxy between the current validator and builders for proposing blocks or not
+	ProxyUrl                   string        `toml:",omitempty"` // Url of the proxy
+	CommissionRate             float64       `toml:",omitempty"` // Commission rate of staking for the current validator
+	MaxAllowDurationForBidding time.Duration `toml:",omitempty"` // Max allowed duration for accepting bids in two rounds interactions
+	TimeoutForRetrieveTxs      time.Duration `toml:",omitempty"` // Timeout duration for retrieving txs from a builder in two rounds interactions
+	SlashBlocksForTxsTimeout   int64         `toml:",omitempty"` // The count of blocks for slashing a builder when retrieving txs timeout; restart node will cancel slashes.
+	SlashBlocksForInvalidBlock int64         `toml:",omitempty"` // The count of blocks for slashing a builder when the proposed block is invalid; restart node will cancel slashes.
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -252,4 +263,12 @@ func (miner *Miner) GetSealingBlock(parent common.Hash, timestamp uint64, coinba
 // to the given channel.
 func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscription {
 	return miner.worker.pendingLogsFeed.Subscribe(ch)
+}
+
+func (miner *Miner) BuilderEnabled() bool {
+	return true
+}
+
+func (miner *Miner) ReceiveBid(ctx context.Context, addr common.Address, block int64, txs types.Transactions, gasValue int64, builderFeeValue int64, gasLimit int64) error {
+	return nil
 }
